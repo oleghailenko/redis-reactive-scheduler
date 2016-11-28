@@ -7,6 +7,8 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
+import com.google.common.base.Preconditions;
+
 import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.EmitterProcessor;
 import reactor.core.publisher.Flux;
@@ -117,6 +119,7 @@ public class Scheduler {
 	 * @return Trigger unique identifier. Can be used for cancel trigger. See {@link this.cancelMessage}
 	 */
 	public <T> String scheduleMessage(long timestamp, T payload, Map<String, Object> headers) {
+		Preconditions.checkArgument(payload != null, "Payload can't be null");
 		log.info("Schedule message at {}", new Date(timestamp));
 		String id = UUID.randomUUID().toString();
 		jedis.zadd(triggerQueqeName, timestamp, id);
