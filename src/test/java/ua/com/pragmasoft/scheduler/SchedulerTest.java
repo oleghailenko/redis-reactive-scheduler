@@ -82,7 +82,7 @@ public class SchedulerTest {
 				System.out.println(message.getS() + " exist");
 				System.exit(5);
 			}
-			if((new Date().getTime() - someMessageMessage.getTriggerTime().getTime()) > TimeUnit.SECONDS.toMillis(1)) {
+			if((System.currentTimeMillis() - someMessageMessage.getTriggerTimestamp()) > TimeUnit.SECONDS.toMillis(1)) {
 				System.exit(6);
 			}
 			ints.add(message.getS());

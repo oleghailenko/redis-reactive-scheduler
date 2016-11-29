@@ -123,7 +123,7 @@ public class Scheduler {
 		log.info("Schedule message at {}", new Date(timestamp));
 		String id = UUID.randomUUID().toString();
 		jedis.zadd(triggerQueueName, timestamp, id);
-		jedis.hset(messageKeyName, id, converter.convert(new Message.MessageBuilder<T>().withPayload(payload).withHeaders(headers).withTriggerTime(new Date(timestamp)).build()));
+		jedis.hset(messageKeyName, id, converter.convert(new Message<T>(payload, System.currentTimeMillis(), timestamp)));
 		return id;
 	}
 
