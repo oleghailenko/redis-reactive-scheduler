@@ -30,8 +30,8 @@ import redis.clients.jedis.Jedis;
 @Slf4j
 public class Scheduler {
 
-	static final String TRIGGERS_QUEUE_NAME = "message:triggers";
-	static final String MESSAGE_KEY_NAME = "message";
+	static final String TRIGGERS_QUEUE_NAME = "scheduler:%s:triggers";
+	static final String MESSAGE_KEY_NAME = "scheduler:%s:message";
 
 	private final Jedis jedis;
 	private final String triggerQueueName;
@@ -50,22 +50,21 @@ public class Scheduler {
 	 * @param jedis Jedis connection
 	 */
 	public Scheduler(Jedis jedis) {
-		this(jedis, new JacksonMessageCoverter(), TRIGGERS_QUEUE_NAME, MESSAGE_KEY_NAME);
+		this(jedis, new JacksonMessageCoverter(), "default");
 	}
 
 	/**
 	 * Build scheduler with provided parameters
 	 *
 	 * @param jedis            Jedis connection
-	 * @param conventer       Implementation of {@link Converter} from {@link Message<>} to {@link String} and vice versa
-	 * @param triggerQueueName name of sorted set for triggers
-	 * @param messageKeyName   name of hash set for messages
+	 * @param conventer        Implementation of {@link Converter} from {@link Message<>} to {@link String} and vice versa
+	 * @param namespace        Namespace of keys in Redis
 	 */
-	public Scheduler(Jedis jedis, Converter<Message<?>, String> conventer, String triggerQueueName, String messageKeyName) {
+	public Scheduler(Jedis jedis, Converter<Message<?>, String> conventer, String namespace) {
 		this.jedis = jedis;
 		this.converter = conventer;
-		this.triggerQueueName = triggerQueueName;
-		this.messageKeyName = messageKeyName;
+		this.triggerQueueName = String.format(TRIGGERS_QUEUE_NAME, namespace);
+		this.messageKeyName = String.format(MESSAGE_KEY_NAME, namespace);
 		flux = Flux.from(emitterProcessor);
 		executorService.scheduleWithFixedDelay(new Trigger(jedis, emitterProcessor, conventer, triggerQueueName, messageKeyName), 1, 1, TimeUnit.SECONDS);
 	}
@@ -123,7 +122,7 @@ public class Scheduler {
 		log.info("Schedule message at {}", new Date(timestamp));
 		String id = UUID.randomUUID().toString();
 		jedis.zadd(triggerQueueName, timestamp, id);
-		jedis.hset(messageKeyName, id, converter.convert(new Message<T>(payload, System.currentTimeMillis(), timestamp)));
+		jedis.hset(messageKeyName, id, converter.convert(new Message<>(payload, System.currentTimeMillis(), timestamp)));
 		return new SchedulerTocken(id);
 	}
 
