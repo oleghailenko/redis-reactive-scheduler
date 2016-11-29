@@ -22,7 +22,7 @@ import redis.clients.jedis.Jedis;
  * <pre>
  * {@code
  *     Scheduler scheduler = new Scheduler(new Jedis());
- *     scheduler.messageStream().messageStream(Systen.out::println);
+ *     scheduler.messageStream().subscribe(Systen.out::println);
  *     scheduler.scheduleMessage(i, TimeUnit.MILLISECONDS, new SomeMessage());
  * }
  * </pre>
@@ -78,7 +78,7 @@ public class Scheduler {
 	 * @param <T>       Class of payload
 	 * @return Trigger unique identifier. Can be used for cancel trigger. See {@link this.cancelMessage}
 	 */
-	public <T> String scheduleMessage(long timestamp, T payload) {
+	public <T> SchedulerTocken scheduleMessage(long timestamp, T payload) {
 		return scheduleMessage(timestamp, payload, null);
 	}
 
@@ -91,7 +91,7 @@ public class Scheduler {
 	 * @param <T>      Class of payload
 	 * @return Trigger unique identifier. Can be used for cancel trigger. See {@link this.cancelMessage}
 	 */
-	public <T> String scheduleMessage(long delay, TimeUnit timeUnit, T payload) {
+	public <T> SchedulerTocken scheduleMessage(long delay, TimeUnit timeUnit, T payload) {
 		return scheduleMessage(new Date().getTime() + timeUnit.toMillis(delay), payload);
 	}
 
@@ -105,7 +105,7 @@ public class Scheduler {
 	 * @param headers   Map with addition headers
 	 * @return Trigger unique identifier. Can be used for cancel trigger. See {@link this.cancelMessage}
 	 */
-	public <T> String scheduleMessage(long delay, TimeUnit timeUnit, T payload, Map<String, Object> headers) {
+	public <T> SchedulerTocken scheduleMessage(long delay, TimeUnit timeUnit, T payload, Map<String, Object> headers) {
 		return scheduleMessage(new Date().getTime() + timeUnit.toMillis(delay), payload, headers);
 	}
 
@@ -118,23 +118,28 @@ public class Scheduler {
 	 * @param headers    Map with addition headers
 	 * @return Trigger unique identifier. Can be used for cancel trigger. See {@link this.cancelMessage}
 	 */
-	public <T> String scheduleMessage(long timestamp, T payload, Map<String, Object> headers) {
+	public <T> SchedulerTocken scheduleMessage(long timestamp, T payload, Map<String, Object> headers) {
 		Preconditions.checkArgument(payload != null, "Payload can't be null");
 		log.info("Schedule message at {}", new Date(timestamp));
 		String id = UUID.randomUUID().toString();
 		jedis.zadd(triggerQueueName, timestamp, id);
 		jedis.hset(messageKeyName, id, converter.convert(new Message<T>(payload, System.currentTimeMillis(), timestamp)));
-		return id;
+		return new SchedulerTocken(id);
 	}
 
 	/**
 	 * Cancel the message.
-	 * @param messageId Unique identifier. Return value of this.scheduleMessage methods.
+	 * @param schedulerTocken Unique identifier. Return value of this.scheduleMessage methods.
 	 */
-	public void cancelMessage(String messageId) {
-		log.info("Cancel message {}", messageId);
-		jedis.hdel(messageKeyName, messageId);
-		jedis.zrem(triggerQueueName, messageId);
+	public void cancelMessage(SchedulerTocken schedulerTocken) {
+		log.info("Cancel message {}", schedulerTocken);
+		jedis.hdel(messageKeyName, schedulerTocken.getTocken());
+		jedis.zrem(triggerQueueName, schedulerTocken.getTocken());
+	}
+
+	public boolean hasMessage(SchedulerTocken schedulerTocken) {
+		log.info("Cheking is message {} exist", schedulerTocken);
+		return jedis.hexists(messageKeyName, schedulerTocken.getTocken());
 	}
 
 	/**

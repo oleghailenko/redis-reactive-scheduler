@@ -24,16 +24,16 @@ public class SchedulerTest {
 
 	@Test
 	public void scheduleTest() {
-		String jobId = scheduler.scheduleMessage(1, TimeUnit.SECONDS, new SomeMessage(1), null);
-		assertThat(jobId, CoreMatchers.notNullValue());
-		assertThat(jedis.hget("message", jobId), CoreMatchers.notNullValue());
+		SchedulerTocken schedulerTocken = scheduler.scheduleMessage(1, TimeUnit.SECONDS, new SomeMessage(1), null);
+		assertThat(schedulerTocken, CoreMatchers.notNullValue());
+		assertThat(scheduler.hasMessage(schedulerTocken), CoreMatchers.is(true));
 	}
 
 	@Test
 	public void cancelTest() {
-		String jobId = scheduler.scheduleMessage(1, TimeUnit.SECONDS, new SomeMessage(1), null);
-		scheduler.cancelMessage(jobId);
-		assertThat(jedis.hget("message", jobId), CoreMatchers.nullValue());
+		SchedulerTocken schedulerTocken = scheduler.scheduleMessage(1, TimeUnit.SECONDS, new SomeMessage(1), null);
+		scheduler.cancelMessage(schedulerTocken);
+		assertThat(scheduler.hasMessage(schedulerTocken), CoreMatchers.is(false));
 	}
 
 	@Test
