@@ -31,12 +31,12 @@ import ua.com.pragmasoft.scheduler.serializer.MessageSerializer;
 @Slf4j
 public class Scheduler {
 
-	static final String TRIGGERS_QUEQE_NAME = "message:triggers";
+	static final String TRIGGERS_QUEUE_NAME = "message:triggers";
 	static final String MESSAGE_KEY_NAME = "message";
 
 	private final Jedis jedis;
 	private final MessageSerializer serializer;
-	private final String triggerQueqeName;
+	private final String triggerQueueName;
 	private final String messageKeyName;
 
 	private final ScheduledExecutorService executorService = Executors.newSingleThreadScheduledExecutor();
@@ -50,7 +50,7 @@ public class Scheduler {
 	 * @param jedis Jedis connection
 	 */
 	public Scheduler(Jedis jedis) {
-		this(jedis, new JacksonMessageSerializer(), TRIGGERS_QUEQE_NAME, MESSAGE_KEY_NAME);
+		this(jedis, new JacksonMessageSerializer(), TRIGGERS_QUEUE_NAME, MESSAGE_KEY_NAME);
 	}
 
 	/**
@@ -58,16 +58,16 @@ public class Scheduler {
 	 *
 	 * @param jedis            Jedis connection
 	 * @param serializer       Implementation of {@link MessageSerializer}
-	 * @param triggerQueqeName name of sorted set for triggers
+	 * @param triggerQueueName name of sorted set for triggers
 	 * @param messageKeyName   name of hash set for messages
 	 */
-	public Scheduler(Jedis jedis, MessageSerializer serializer, String triggerQueqeName, String messageKeyName) {
+	public Scheduler(Jedis jedis, MessageSerializer serializer, String triggerQueueName, String messageKeyName) {
 		this.jedis = jedis;
 		this.serializer = serializer;
-		this.triggerQueqeName = triggerQueqeName;
+		this.triggerQueueName = triggerQueueName;
 		this.messageKeyName = messageKeyName;
 		flux = Flux.from(emitterProcessor);
-		executorService.scheduleWithFixedDelay(new Trigger(jedis, emitterProcessor, serializer, triggerQueqeName, messageKeyName), 1, 1, TimeUnit.SECONDS);
+		executorService.scheduleWithFixedDelay(new Trigger(jedis, emitterProcessor, serializer, triggerQueueName, messageKeyName), 1, 1, TimeUnit.SECONDS);
 	}
 
 	/**
@@ -122,7 +122,7 @@ public class Scheduler {
 		Preconditions.checkArgument(payload != null, "Payload can't be null");
 		log.info("Schedule message at {}", new Date(timestamp));
 		String id = UUID.randomUUID().toString();
-		jedis.zadd(triggerQueqeName, timestamp, id);
+		jedis.zadd(triggerQueueName, timestamp, id);
 		jedis.hset(messageKeyName, id, serializer.serialize(new Message.MessageBuilder<T>().withPayload(payload).withHeaders(headers).withTriggerTime(new Date(timestamp)).build()));
 		return id;
 	}
@@ -134,7 +134,7 @@ public class Scheduler {
 	public void cancelMessage(String messageId) {
 		log.info("Cancel message {}", messageId);
 		jedis.hdel(messageKeyName, messageId);
-		jedis.zrem(triggerQueqeName, messageId);
+		jedis.zrem(triggerQueueName, messageId);
 	}
 
 	/**

@@ -26,7 +26,7 @@ public class Trigger implements Runnable {
 	private final String messageKeyName;
 
 	public Trigger(Jedis jedis, EmitterProcessor<Message<?>> emitterProcessor) {
-		this(jedis, emitterProcessor, new JacksonMessageSerializer(), Scheduler.TRIGGERS_QUEQE_NAME, Scheduler.MESSAGE_KEY_NAME);
+		this(jedis, emitterProcessor, new JacksonMessageSerializer(), Scheduler.TRIGGERS_QUEUE_NAME, Scheduler.MESSAGE_KEY_NAME);
 	}
 
 	public Trigger(Jedis jedis, EmitterProcessor<Message<?>> emitterProcessor, MessageSerializer serializer, String triggerQueueName, String messageKeyName) {
