@@ -2,7 +2,6 @@ package ua.com.pragmasoft.scheduler;
 
 import static org.junit.Assert.assertThat;
 
-import java.util.Date;
 import java.util.HashSet;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
@@ -39,7 +38,7 @@ public class SchedulerTest {
 
 	@Test
 	public void test1() throws InterruptedException {
-		scheduler.subscribe().subscribe(new SequentialConsumer());
+		scheduler.messageStream().subscribe(new SequentialConsumer());
 		scheduler.scheduleMessage(2, TimeUnit.SECONDS, new SomeMessage(1));
 		scheduler.scheduleMessage(2, TimeUnit.SECONDS, new SomeMessage(2));
 		scheduler.scheduleMessage(3, TimeUnit.SECONDS, new SomeMessage(4));
@@ -54,7 +53,7 @@ public class SchedulerTest {
 		Runnable runnable = () -> {
 			Jedis jedis = new Jedis();
 			Scheduler scheduler = new Scheduler(jedis);
-			scheduler.subscribe().subscribe(consumer);
+			scheduler.messageStream().subscribe(consumer);
 		};
 		for(int i = 0; i < 10; i++) {
 			new Thread(runnable).start();

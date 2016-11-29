@@ -22,7 +22,7 @@ import redis.clients.jedis.Jedis;
  * <pre>
  * {@code
  *     Scheduler scheduler = new Scheduler(new Jedis());
- *     scheduler.subscribe().subscribe(Systen.out::println);
+ *     scheduler.messageStream().messageStream(Systen.out::println);
  *     scheduler.scheduleMessage(i, TimeUnit.MILLISECONDS, new SomeMessage());
  * }
  * </pre>
@@ -141,7 +141,7 @@ public class Scheduler {
 	 * Returns {@link Flux} You can listen.
 	 * @return flux
 	 */
-	public Flux<Message<?>> subscribe() {
+	public Flux<Message<?>> messageStream() {
 		return flux;
 	}
 
