@@ -7,14 +7,13 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
+import com.google.common.base.Converter;
 import com.google.common.base.Preconditions;
 
 import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.EmitterProcessor;
 import reactor.core.publisher.Flux;
 import redis.clients.jedis.Jedis;
-import ua.com.pragmasoft.scheduler.serializer.JacksonMessageSerializer;
-import ua.com.pragmasoft.scheduler.serializer.MessageSerializer;
 
 /**
  * Simple destributive Scheduler implemenration based on Redis.
@@ -35,9 +34,10 @@ public class Scheduler {
 	static final String MESSAGE_KEY_NAME = "message";
 
 	private final Jedis jedis;
-	private final MessageSerializer serializer;
 	private final String triggerQueueName;
 	private final String messageKeyName;
+
+	private Converter<Message<?>, String> converter;
 
 	private final ScheduledExecutorService executorService = Executors.newSingleThreadScheduledExecutor();
 	private final Flux<Message<?>> flux;
@@ -45,29 +45,29 @@ public class Scheduler {
 
 	/**
 	 * Build scheduler.
-	 * Use {@link JacksonMessageSerializer} as serializer.
+	 * Use {@link JacksonMessageCoverter} as converter.
 	 *
 	 * @param jedis Jedis connection
 	 */
 	public Scheduler(Jedis jedis) {
-		this(jedis, new JacksonMessageSerializer(), TRIGGERS_QUEUE_NAME, MESSAGE_KEY_NAME);
+		this(jedis, new JacksonMessageCoverter(), TRIGGERS_QUEUE_NAME, MESSAGE_KEY_NAME);
 	}
 
 	/**
 	 * Build scheduler with provided parameters
 	 *
 	 * @param jedis            Jedis connection
-	 * @param serializer       Implementation of {@link MessageSerializer}
+	 * @param conventer       Implementation of {@link Converter} from {@link Message<>} to {@link String} and vice versa
 	 * @param triggerQueueName name of sorted set for triggers
 	 * @param messageKeyName   name of hash set for messages
 	 */
-	public Scheduler(Jedis jedis, MessageSerializer serializer, String triggerQueueName, String messageKeyName) {
+	public Scheduler(Jedis jedis, Converter<Message<?>, String> conventer, String triggerQueueName, String messageKeyName) {
 		this.jedis = jedis;
-		this.serializer = serializer;
+		this.converter = conventer;
 		this.triggerQueueName = triggerQueueName;
 		this.messageKeyName = messageKeyName;
 		flux = Flux.from(emitterProcessor);
-		executorService.scheduleWithFixedDelay(new Trigger(jedis, emitterProcessor, serializer, triggerQueueName, messageKeyName), 1, 1, TimeUnit.SECONDS);
+		executorService.scheduleWithFixedDelay(new Trigger(jedis, emitterProcessor, conventer, triggerQueueName, messageKeyName), 1, 1, TimeUnit.SECONDS);
 	}
 
 	/**
@@ -123,7 +123,7 @@ public class Scheduler {
 		log.info("Schedule message at {}", new Date(timestamp));
 		String id = UUID.randomUUID().toString();
 		jedis.zadd(triggerQueueName, timestamp, id);
-		jedis.hset(messageKeyName, id, serializer.serialize(new Message.MessageBuilder<T>().withPayload(payload).withHeaders(headers).withTriggerTime(new Date(timestamp)).build()));
+		jedis.hset(messageKeyName, id, converter.convert(new Message.MessageBuilder<T>().withPayload(payload).withHeaders(headers).withTriggerTime(new Date(timestamp)).build()));
 		return id;
 	}
 

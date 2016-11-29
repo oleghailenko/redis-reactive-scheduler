@@ -5,13 +5,13 @@ import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
 
+import com.google.common.base.Converter;
+
 import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.EmitterProcessor;
 import redis.clients.jedis.Jedis;
 import redis.clients.jedis.Transaction;
 import redis.clients.jedis.Tuple;
-import ua.com.pragmasoft.scheduler.serializer.JacksonMessageSerializer;
-import ua.com.pragmasoft.scheduler.serializer.MessageSerializer;
 
 /**
  * Simple Redis Sorted Set listener
@@ -21,18 +21,18 @@ public class Trigger implements Runnable {
 
 	private final Jedis jedis;
 	private final EmitterProcessor<Message<?>> emitterProcessor;
-	private final MessageSerializer serializer;
+	private final Converter<Message<?>, String> converter;
 	private final String triggerQueueName;
 	private final String messageKeyName;
 
 	public Trigger(Jedis jedis, EmitterProcessor<Message<?>> emitterProcessor) {
-		this(jedis, emitterProcessor, new JacksonMessageSerializer(), Scheduler.TRIGGERS_QUEUE_NAME, Scheduler.MESSAGE_KEY_NAME);
+		this(jedis, emitterProcessor, new JacksonMessageCoverter(), Scheduler.TRIGGERS_QUEUE_NAME, Scheduler.MESSAGE_KEY_NAME);
 	}
 
-	public Trigger(Jedis jedis, EmitterProcessor<Message<?>> emitterProcessor, MessageSerializer serializer, String triggerQueueName, String messageKeyName) {
+	public Trigger(Jedis jedis, EmitterProcessor<Message<?>> emitterProcessor, Converter<Message<?>, String > converter, String triggerQueueName, String messageKeyName) {
 		this.jedis = jedis;
 		this.emitterProcessor = emitterProcessor;
-		this.serializer = serializer;
+		this.converter = converter;
 		this.triggerQueueName = triggerQueueName;
 		this.messageKeyName = messageKeyName;
 	}
@@ -59,9 +59,10 @@ public class Trigger implements Runnable {
 		}
 	}
 
+	@SuppressWarnings("ConstantConditions")
 	private void publishMessage(String messageKey) {
 		if(jedis.hexists(messageKeyName, messageKey)) {
-			Message<?> message = serializer.deserilize(jedis.hget(messageKeyName, messageKey));
+			Message<?> message = converter.reverse().convert(jedis.hget(messageKeyName, messageKey));
 			log.info("Publish message {}", message);
 			jedis.hdel(messageKeyName, messageKey);
 			emitterProcessor.onNext(message);
