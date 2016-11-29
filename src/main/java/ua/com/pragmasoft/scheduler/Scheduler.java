@@ -7,6 +7,9 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
+import org.joda.time.DateTime;
+import org.joda.time.Duration;
+
 import com.google.common.base.Converter;
 import com.google.common.base.Preconditions;
 
@@ -72,40 +75,25 @@ public class Scheduler {
 	/**
 	 * Schedules message with payload in particular time
 	 *
-	 * @param timestamp Time, when message should be thrown
+	 * @param dateTime Time, when message should be thrown
 	 * @param payload   Payload
 	 * @param <T>       Class of payload
 	 * @return Trigger unique identifier. Can be used for cancel trigger. See {@link this.cancelMessage}
 	 */
-	public <T> SchedulerTocken scheduleMessage(long timestamp, T payload) {
-		return scheduleMessage(timestamp, payload, null);
+	public <T> SchedulerTocken scheduleMessage(DateTime dateTime, T payload) {
+		return scheduleMessage(dateTime.getMillis(), payload);
 	}
 
 	/**
 	 * Schedules message with payload in particular time
 	 *
-	 * @param delay    Delay from now, when message should be thrown
-	 * @param timeUnit Delay time unit one of {@link TimeUnit}
+	 * @param duration    Delay from now, when message should be thrown
 	 * @param payload  Payload
 	 * @param <T>      Class of payload
 	 * @return Trigger unique identifier. Can be used for cancel trigger. See {@link this.cancelMessage}
 	 */
-	public <T> SchedulerTocken scheduleMessage(long delay, TimeUnit timeUnit, T payload) {
-		return scheduleMessage(new Date().getTime() + timeUnit.toMillis(delay), payload);
-	}
-
-	/**
-	 * Schedules message with payload in particular time
-	 *
-	 * @param delay    Delay from now, when message should be thrown
-	 * @param timeUnit Delay time unit one of {@link TimeUnit}
-	 * @param payload  Payload
-	 * @param <T>      Class of payload
-	 * @param headers   Map with addition headers
-	 * @return Trigger unique identifier. Can be used for cancel trigger. See {@link this.cancelMessage}
-	 */
-	public <T> SchedulerTocken scheduleMessage(long delay, TimeUnit timeUnit, T payload, Map<String, Object> headers) {
-		return scheduleMessage(new Date().getTime() + timeUnit.toMillis(delay), payload, headers);
+	public <T> SchedulerTocken scheduleMessage(Duration duration, T payload) {
+		return scheduleMessage(new DateTime().plus(duration.getMillis()), payload);
 	}
 
 	/**
@@ -114,10 +102,9 @@ public class Scheduler {
 	 * @param timestamp Time, when message should be thrown
 	 * @param payload   Payload
 	 * @param <T>       Class of payload
-	 * @param headers    Map with addition headers
 	 * @return Trigger unique identifier. Can be used for cancel trigger. See {@link this.cancelMessage}
 	 */
-	public <T> SchedulerTocken scheduleMessage(long timestamp, T payload, Map<String, Object> headers) {
+	private <T> SchedulerTocken scheduleMessage(long timestamp, T payload) {
 		Preconditions.checkArgument(payload != null, "Payload can't be null");
 		log.info("Schedule message at {}", new Date(timestamp));
 		String id = UUID.randomUUID().toString();

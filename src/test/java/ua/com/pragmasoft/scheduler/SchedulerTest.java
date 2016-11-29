@@ -8,6 +8,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 
 import org.hamcrest.CoreMatchers;
+import org.joda.time.Duration;
 import org.junit.Test;
 
 import lombok.Data;
@@ -24,14 +25,14 @@ public class SchedulerTest {
 
 	@Test
 	public void scheduleTest() {
-		SchedulerTocken schedulerTocken = scheduler.scheduleMessage(1, TimeUnit.SECONDS, new SomeMessage(1), null);
+		SchedulerTocken schedulerTocken = scheduler.scheduleMessage(Duration.standardSeconds(2), new SomeMessage(1));
 		assertThat(schedulerTocken, CoreMatchers.notNullValue());
 		assertThat(scheduler.hasMessage(schedulerTocken), CoreMatchers.is(true));
 	}
 
 	@Test
 	public void cancelTest() {
-		SchedulerTocken schedulerTocken = scheduler.scheduleMessage(1, TimeUnit.SECONDS, new SomeMessage(1), null);
+		SchedulerTocken schedulerTocken = scheduler.scheduleMessage(Duration.standardSeconds(1), new SomeMessage(1));
 		scheduler.cancelMessage(schedulerTocken);
 		assertThat(scheduler.hasMessage(schedulerTocken), CoreMatchers.is(false));
 	}
@@ -39,11 +40,11 @@ public class SchedulerTest {
 	@Test
 	public void test1() throws InterruptedException {
 		scheduler.messageStream().subscribe(new SequentialConsumer());
-		scheduler.scheduleMessage(2, TimeUnit.SECONDS, new SomeMessage(1));
-		scheduler.scheduleMessage(2, TimeUnit.SECONDS, new SomeMessage(2));
-		scheduler.scheduleMessage(3, TimeUnit.SECONDS, new SomeMessage(4));
-		scheduler.scheduleMessage(2, TimeUnit.SECONDS, new SomeMessage(3));
-		scheduler.scheduleMessage(4, TimeUnit.SECONDS, new SomeMessage(5));
+		scheduler.scheduleMessage(Duration.standardSeconds(2), new SomeMessage(1));
+		scheduler.scheduleMessage(Duration.standardSeconds(2), new SomeMessage(2));
+		scheduler.scheduleMessage(Duration.standardSeconds(2), new SomeMessage(4));
+		scheduler.scheduleMessage(Duration.standardSeconds(2), new SomeMessage(3));
+		scheduler.scheduleMessage(Duration.standardSeconds(2), new SomeMessage(5));
 		Thread.sleep(6000);
 	}
 
@@ -59,7 +60,7 @@ public class SchedulerTest {
 			new Thread(runnable).start();
 		}
 		for (int i = 0; i<100; i++) {
-			scheduler.scheduleMessage(i, TimeUnit.MILLISECONDS, new SomeMessage(i));
+			scheduler.scheduleMessage(Duration.millis(1), new SomeMessage(i));
 			Thread.sleep(200);
 		}
 	}
