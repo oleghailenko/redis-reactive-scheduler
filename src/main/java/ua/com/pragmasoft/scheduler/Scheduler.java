@@ -1,6 +1,8 @@
 package ua.com.pragmasoft.scheduler;
 
 import java.util.Date;
+import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -8,6 +10,8 @@ import java.util.concurrent.TimeUnit;
 
 import org.joda.time.DateTime;
 import org.joda.time.Duration;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import com.google.common.base.Converter;
 import com.google.common.base.Preconditions;
@@ -17,6 +21,8 @@ import reactor.core.publisher.EmitterProcessor;
 import reactor.core.publisher.Flux;
 import redis.clients.jedis.Jedis;
 import redis.clients.jedis.JedisPool;
+import redis.clients.jedis.Transaction;
+import redis.clients.jedis.Tuple;
 
 /**
  * Simple destributive Scheduler implemenration based on Redis.
@@ -50,7 +56,8 @@ public class Scheduler {
 	private EmitterProcessor<Message<?>> emitterProcessor = EmitterProcessor.<Message<?>>create().connect();
 
 	private Jedis schrdulerConnection;
-	private Jedis trigerConnection;
+	private Jedis triggerConnection;
+	private Trigger trigger;
 
 	private volatile boolean isRunning = false;
 
@@ -86,8 +93,9 @@ public class Scheduler {
 		Preconditions.checkState(!isRunning, "Scheduler already running.");
 		log.info("Starting scheduler");
 		schrdulerConnection = jedisPool.getResource();
-		trigerConnection = jedisPool.getResource();
-		executorService.scheduleWithFixedDelay(new Trigger(trigerConnection, emitterProcessor, converter, triggerQueueName, messageKeyName), 1, 1, TimeUnit.SECONDS);
+		triggerConnection = jedisPool.getResource();
+		trigger = new Trigger(triggerConnection, emitterProcessor, converter, triggerQueueName, messageKeyName);
+		scheduleTrigger(trigger);
 		isRunning = true;
 
 	}
@@ -100,8 +108,8 @@ public class Scheduler {
 		log.info("Stopping scheduler");
 		schrdulerConnection.close();
 		schrdulerConnection = null;
-		trigerConnection.close();
-		trigerConnection = null;
+		triggerConnection.close();
+		triggerConnection = null;
 		executorService.shutdown();
 		isRunning = false;
 	}
@@ -198,4 +206,68 @@ public class Scheduler {
 		return flux;
 	}
 
+	private void scheduleTrigger(Trigger trigger) {
+		this.executorService.schedule(trigger, 1, TimeUnit.SECONDS);
+	}
+
+	/**
+	 * Simple Redis Sorted Set listener
+	 */
+	private class Trigger implements Runnable {
+
+		Logger log = LoggerFactory.getLogger(this.getClass());
+
+		private final Jedis jedis;
+		private final EmitterProcessor<Message<?>> emitterProcessor;
+		private final Converter<Message<?>, String> converter;
+		private final String triggerQueueName;
+		private final String messageKeyName;
+
+		public Trigger(Jedis jedis, EmitterProcessor<Message<?>> emitterProcessor) {
+			this(jedis, emitterProcessor, new JacksonMessageCoverter(), TRIGGERS_QUEUE_NAME, MESSAGE_KEY_NAME);
+		}
+
+		public Trigger(Jedis jedis, EmitterProcessor<Message<?>> emitterProcessor, Converter<Message<?>, String > converter, String triggerQueueName, String messageKeyName) {
+			this.jedis = jedis;
+			this.emitterProcessor = emitterProcessor;
+			this.converter = converter;
+			this.triggerQueueName = triggerQueueName;
+			this.messageKeyName = messageKeyName;
+		}
+
+		@Override
+		public void run() {
+			log.info("Get triggers...");
+			Set<Tuple> triggers;
+			do {
+				triggers = jedis.zrangeByScoreWithScores(triggerQueueName, 0, System.currentTimeMillis());
+				log.info("Got {} triggers", triggers.size());
+				if (triggers.size() > 0) {
+					jedis.watch(triggerQueueName);
+					Transaction transaction = jedis.multi();
+					String firstKey = triggers.iterator().next().getElement();
+					transaction.zrem(triggerQueueName, firstKey);
+					log.info("Delete trigger...");
+					List<Object> result = transaction.exec();
+					if (!result.isEmpty() && result.get(0).equals(1L)) {
+						log.info("We are first");
+						publishMessage(firstKey);
+					} else {
+						log.info("We aren't first");
+					}
+				}
+			} while (triggers.size() > 1);
+			Scheduler.this.scheduleTrigger(this);
+		}
+
+		@SuppressWarnings("ConstantConditions")
+		private void publishMessage(String messageKey) {
+			if(jedis.hexists(messageKeyName, messageKey)) {
+				Message<?> message = converter.reverse().convert(jedis.hget(messageKeyName, messageKey));
+				log.info("Publish message {} {}", messageKey, message);
+				jedis.hdel(messageKeyName, messageKey);
+				emitterProcessor.onNext(message);
+			}
+		}
+	}
 }
