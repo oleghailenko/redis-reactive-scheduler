@@ -30,10 +30,12 @@ Add dependency
 ```java
 public class Test {
 	public static void main(String[] args) {
-		Scheduler scheduler = new Scheduler(new Jedis());
+		Scheduler scheduler = new Scheduler(new JedisPool());
+		scheduler.start();
         scheduler.messageStream().subscribe(Systen.out::println);
         scheduler.scheduleMessage(1, TimeUnit.MILLISECONDS, new SomeMessage());
         Thread.sleep(5000); //Scheduler live while application is live
+        scheduler.stop();
 	}
 }
 

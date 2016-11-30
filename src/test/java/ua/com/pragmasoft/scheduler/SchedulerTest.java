@@ -9,25 +9,44 @@ import java.util.function.Consumer;
 
 import org.hamcrest.CoreMatchers;
 import org.joda.time.Duration;
+import org.junit.After;
+import org.junit.Before;
 import org.junit.Test;
 
 import lombok.Data;
 import lombok.NonNull;
 import redis.clients.jedis.Jedis;
+import redis.clients.jedis.JedisPool;
 
 /**
  * Test uses Redis on localhost:6379
  */
 public class SchedulerTest {
 
-	private Jedis jedis = new Jedis();
-	private Scheduler scheduler = new Scheduler(jedis);
+	private JedisPool jedisPool;
+	private Scheduler scheduler;
+
+	@Before
+	public void setUp() {
+		jedisPool = new JedisPool("localhost", 6379);
+		scheduler = new Scheduler(jedisPool);
+		Jedis jedis = jedisPool.getResource();
+		jedis.eval("return redis.call('FLUSHALL')");
+		jedis.close();
+		scheduler.start();
+	}
+
+	@After
+	public void shutdown() {
+		scheduler.stop();
+	}
 
 	@Test
 	public void scheduleTest() {
 		SchedulerTocken schedulerTocken = scheduler.scheduleMessage(Duration.standardSeconds(2), new SomeMessage(1));
 		assertThat(schedulerTocken, CoreMatchers.notNullValue());
 		assertThat(scheduler.hasMessage(schedulerTocken), CoreMatchers.is(true));
+		assertThat(scheduler.getMessage(schedulerTocken).getPayload(), CoreMatchers.is(new SomeMessage(1)));
 	}
 
 	@Test
@@ -52,8 +71,8 @@ public class SchedulerTest {
 	public void test2() throws InterruptedException {
 		SequentialConsumer consumer = new SequentialConsumer();
 		Runnable runnable = () -> {
-			Jedis jedis = new Jedis();
-			Scheduler scheduler = new Scheduler(jedis);
+			Scheduler scheduler = new Scheduler(new JedisPool("localhost", 6379));
+			scheduler.start();
 			scheduler.messageStream().subscribe(consumer);
 		};
 		for(int i = 0; i < 10; i++) {
@@ -73,7 +92,11 @@ public class SchedulerTest {
 
 	public class SequentialConsumer implements Consumer<Message<?>> {
 
-		private Set<Integer> ints = new HashSet<>();
+		private Set<Integer> ints;
+
+		public SequentialConsumer() {
+			this.ints = new HashSet<>();
+		}
 
 		@Override
 		public void accept(Message<?> someMessageMessage) {
@@ -82,7 +105,8 @@ public class SchedulerTest {
 				System.out.println(message.getS() + " exist");
 				System.exit(5);
 			}
-			if((System.currentTimeMillis() - someMessageMessage.getTriggerTimestamp()) > TimeUnit.SECONDS.toMillis(1)) {
+			if((System.currentTimeMillis() - someMessageMessage.getTriggerTimestamp()) > TimeUnit.SECONDS.toMillis(2)) {
+				System.out.println("Too late");
 				System.exit(6);
 			}
 			ints.add(message.getS());

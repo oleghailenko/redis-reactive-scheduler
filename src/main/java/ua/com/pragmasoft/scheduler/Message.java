@@ -8,9 +8,7 @@ import com.fasterxml.jackson.annotation.JsonAutoDetect;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableMap;
 
-import lombok.Builder;
-import lombok.NonNull;
-import lombok.Value;
+import lombok.*;
 
 
 /**
@@ -21,6 +19,7 @@ import lombok.Value;
  */
 @Value
 @Builder
+@AllArgsConstructor(access = AccessLevel.PUBLIC)
 public class Message<T> {
 
 	@NonNull

@@ -50,7 +50,7 @@ public class Trigger implements Runnable {
 			transaction.zrem(triggerQueueName, triggerKeys.toArray(new String[0]));
 			log.info("Delete triggers...");
 			List<Object> result = transaction.exec();
-			if (!result.isEmpty() && result.get(0).equals(triggerKeys.size())) {
+			if (!result.isEmpty() && result.get(0).equals((long)triggerKeys.size())) {
 				log.info("We are first");
 				triggerKeys.forEach(this::publishMessage);
 			} else {
@@ -63,7 +63,7 @@ public class Trigger implements Runnable {
 	private void publishMessage(String messageKey) {
 		if(jedis.hexists(messageKeyName, messageKey)) {
 			Message<?> message = converter.reverse().convert(jedis.hget(messageKeyName, messageKey));
-			log.info("Publish message {}", message);
+			log.info("Publish message {} {}", messageKey, message);
 			jedis.hdel(messageKeyName, messageKey);
 			emitterProcessor.onNext(message);
 		}
