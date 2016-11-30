@@ -1,9 +1,7 @@
 package ua.com.pragmasoft.scheduler;
 
-import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
-import java.util.stream.Collectors;
 
 import com.google.common.base.Converter;
 
@@ -40,23 +38,25 @@ public class Trigger implements Runnable {
 	@Override
 	public void run() {
 		log.info("Get triggers...");
-		Set<Tuple> triggers = jedis.zrangeByScoreWithScores(triggerQueueName, 0, System.currentTimeMillis());
-		log.info("Got {} triggers", triggers.size());
-		if (triggers.size() > 0) {
-			jedis.watch(triggerQueueName);
-			Transaction transaction = jedis.multi();
-			Set<String> triggerKeys = new HashSet<>(triggers.size());
-			triggerKeys.addAll(triggers.stream().map(Tuple::getElement).collect(Collectors.toList()));
-			transaction.zrem(triggerQueueName, triggerKeys.toArray(new String[0]));
-			log.info("Delete triggers...");
-			List<Object> result = transaction.exec();
-			if (!result.isEmpty() && result.get(0).equals((long)triggerKeys.size())) {
-				log.info("We are first");
-				triggerKeys.forEach(this::publishMessage);
-			} else {
-				log.info("We aren't first");
+		Set<Tuple> triggers;
+		do {
+			triggers = jedis.zrangeByScoreWithScores(triggerQueueName, 0, System.currentTimeMillis());
+			log.info("Got {} triggers", triggers.size());
+			if (triggers.size() > 0) {
+				jedis.watch(triggerQueueName);
+				Transaction transaction = jedis.multi();
+				String firstKey = triggers.iterator().next().getElement();
+				transaction.zrem(triggerQueueName, firstKey);
+				log.info("Delete trigger...");
+				List<Object> result = transaction.exec();
+				if (!result.isEmpty() && result.get(0).equals(1L)) {
+					log.info("We are first");
+					publishMessage(firstKey);
+				} else {
+					log.info("We aren't first");
+				}
 			}
-		}
+		} while (triggers.size() > 1);
 	}
 
 	@SuppressWarnings("ConstantConditions")

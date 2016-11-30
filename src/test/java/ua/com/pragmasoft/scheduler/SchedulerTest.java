@@ -70,10 +70,11 @@ public class SchedulerTest {
 	@Test
 	public void test2() throws InterruptedException {
 		SequentialConsumer consumer = new SequentialConsumer();
+		scheduler.messageStream().subscribe(consumer);
 		Runnable runnable = () -> {
 			Scheduler scheduler = new Scheduler(new JedisPool("localhost", 6379));
-			scheduler.start();
 			scheduler.messageStream().subscribe(consumer);
+			scheduler.start();
 		};
 		for(int i = 0; i < 10; i++) {
 			new Thread(runnable).start();
@@ -82,6 +83,7 @@ public class SchedulerTest {
 			scheduler.scheduleMessage(Duration.millis(1), new SomeMessage(i));
 			Thread.sleep(200);
 		}
+		assertThat(consumer.ints.size(), CoreMatchers.is(100));
 	}
 
 	@Data

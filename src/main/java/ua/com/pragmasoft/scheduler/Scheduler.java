@@ -195,7 +195,6 @@ public class Scheduler {
 	 * @return flux
 	 */
 	public Flux<Message<?>> messageStream() {
-		Preconditions.checkState(isRunning, "Scheduler are not running.");
 		return flux;
 	}
 
