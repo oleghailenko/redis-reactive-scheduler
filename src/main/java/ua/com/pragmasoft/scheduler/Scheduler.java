@@ -20,7 +20,6 @@ import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.EmitterProcessor;
 import reactor.core.publisher.Flux;
 import redis.clients.jedis.Jedis;
-import redis.clients.jedis.JedisPool;
 import redis.clients.jedis.Transaction;
 import redis.clients.jedis.Tuple;
 
@@ -45,7 +44,9 @@ public class Scheduler {
 	static final String TRIGGERS_QUEUE_NAME = "scheduler:%s:triggers";
 	static final String MESSAGE_KEY_NAME = "scheduler:%s:message";
 
-	private final JedisPool jedisPool;
+	private final Object mutex = new Object();
+
+	private final Jedis jedis;
 	private final String triggerQueueName;
 	private final String messageKeyName;
 
@@ -55,8 +56,6 @@ public class Scheduler {
 	private final Flux<Message<?>> flux;
 	private EmitterProcessor<Message<?>> emitterProcessor = EmitterProcessor.<Message<?>>create().connect();
 
-	private Jedis schrdulerConnection;
-	private Jedis triggerConnection;
 	private Trigger trigger;
 
 	private volatile boolean isRunning = false;
@@ -65,21 +64,21 @@ public class Scheduler {
 	 * Build scheduler.
 	 * Use {@link JacksonMessageCoverter} as converter.
 	 *
-	 * @param jedisPool Jedis connection pool
+	 * @param jedis Jedis connection
 	 */
-	public Scheduler(JedisPool jedisPool) {
-		this(jedisPool, new JacksonMessageCoverter(), "default");
+	public Scheduler(Jedis jedis) {
+		this(jedis, new JacksonMessageCoverter(), "default");
 	}
 
 	/**
 	 * Build scheduler with provided parameters
 	 *
-	 * @param jedisPool        Jedis connection pool
+	 * @param jedis        Jedis connection
 	 * @param converter        Implementation of {@link Converter} from {@link Message<>} to {@link String} and vice versa
 	 * @param namespace        Namespace of keys in Redis
 	 */
-	public Scheduler(JedisPool jedisPool, Converter<Message<?>, String> converter, String namespace) {
-		this.jedisPool = jedisPool;
+	public Scheduler(Jedis jedis, Converter<Message<?>, String> converter, String namespace) {
+		this.jedis = jedis;
 		this.converter = converter;
 		this.triggerQueueName = String.format(TRIGGERS_QUEUE_NAME, namespace);
 		this.messageKeyName = String.format(MESSAGE_KEY_NAME, namespace);
@@ -92,9 +91,7 @@ public class Scheduler {
 	public void start() {
 		Preconditions.checkState(!isRunning, "Scheduler already running.");
 		log.info("Starting scheduler");
-		schrdulerConnection = jedisPool.getResource();
-		triggerConnection = jedisPool.getResource();
-		trigger = new Trigger(triggerConnection, emitterProcessor, converter, triggerQueueName, messageKeyName);
+		trigger = new Trigger();
 		scheduleTrigger(trigger);
 		isRunning = true;
 
@@ -106,12 +103,13 @@ public class Scheduler {
 	public void stop() {
 		Preconditions.checkState(isRunning, "Scheduler are not running.");
 		log.info("Stopping scheduler");
-		schrdulerConnection.close();
-		schrdulerConnection = null;
-		triggerConnection.close();
-		triggerConnection = null;
+		jedis.close();
 		executorService.shutdown();
 		isRunning = false;
+	}
+
+	public boolean isRunning() {
+		return isRunning || !executorService.isTerminated();
 	}
 
 	/**
@@ -152,11 +150,19 @@ public class Scheduler {
 	private <T> SchedulerTocken scheduleMessage(long timestamp, T payload) {
 		Preconditions.checkArgument(payload != null, "Payload can't be null");
 		Preconditions.checkState(isRunning, "Scheduler are not running.");
-		log.info("Schedule message at {}", new Date(timestamp));
 		String id = UUID.randomUUID().toString();
-		schrdulerConnection.zadd(triggerQueueName, timestamp, id);
-		schrdulerConnection.hset(messageKeyName, id, converter.convert(new Message<>(payload, System.currentTimeMillis(), timestamp)));
-		return new SchedulerTocken(id);
+		SchedulerTocken tocken = new SchedulerTocken(id);
+		Message<?> message = new Message<>(payload, System.currentTimeMillis(), timestamp, tocken);
+		synchronized (mutex) {
+			Transaction transaction = jedis.multi();
+			transaction.zadd(triggerQueueName, timestamp, id);
+			transaction.hset(messageKeyName, id, converter.convert(message));
+			transaction.exec();
+		}
+		if(log.isTraceEnabled()) {
+			log.trace("Schedule message {} at {}", message, new Date(timestamp));
+		}
+		return tocken;
 	}
 
 	/**
@@ -166,9 +172,15 @@ public class Scheduler {
 	 */
 	public void cancelMessage(SchedulerTocken schedulerTocken) {
 		Preconditions.checkState(isRunning, "Scheduler are not running.");
-		log.info("Cancel message {}", schedulerTocken);
-		schrdulerConnection.hdel(messageKeyName, schedulerTocken.getTocken());
-		schrdulerConnection.zrem(triggerQueueName, schedulerTocken.getTocken());
+		if(log.isTraceEnabled()) {
+			log.trace("Cancel message {}", schedulerTocken);
+		}
+		synchronized (mutex) {
+			Transaction transaction = jedis.multi();
+			transaction.hdel(messageKeyName, schedulerTocken.getTocken());
+			transaction.zrem(triggerQueueName, schedulerTocken.getTocken());
+			transaction.exec();
+		}
 	}
 
 	/**
@@ -179,8 +191,22 @@ public class Scheduler {
 	 */
 	public boolean hasMessage(SchedulerTocken schedulerTocken) {
 		Preconditions.checkState(isRunning, "Scheduler are not running.");
-		log.info("Cheking is message {} exist", schedulerTocken);
-		return schrdulerConnection.hexists(messageKeyName, schedulerTocken.getTocken());
+		if(log.isTraceEnabled()) {
+			log.trace("Cheking is message {} exist", schedulerTocken);
+		}
+		synchronized (mutex) {
+			if(jedis.hexists(messageKeyName, schedulerTocken.getTocken())) {
+				if(log.isTraceEnabled()) {
+					log.trace("Message {} exist", schedulerTocken);
+				}
+				return true;
+			} else {
+				if(log.isTraceEnabled()) {
+					log.trace("Message {} dow not exist", schedulerTocken);
+				}
+				return false;
+			}
+		}
 	}
 
 	/**
@@ -191,9 +217,15 @@ public class Scheduler {
 	 */
 	public Message<?> getMessage(SchedulerTocken schedulerTocken) {
 		Preconditions.checkState(isRunning, "Scheduler are not running.");
-		log.info("Getting message {}", schedulerTocken);
+		if(log.isTraceEnabled()) {
+			log.trace("Getting message {}", schedulerTocken);
+		}
 		if(hasMessage(schedulerTocken)) {
-			return converter.reverse().convert(schrdulerConnection.hget(messageKeyName, schedulerTocken.getTocken()));
+			String serializedMessage;
+			synchronized (mutex) {
+				serializedMessage = jedis.hget(messageKeyName, schedulerTocken.getTocken());
+			}
+			return converter.reverse().convert(serializedMessage);
 		}
 		return null;
 	}
@@ -207,7 +239,9 @@ public class Scheduler {
 	}
 
 	private void scheduleTrigger(Trigger trigger) {
-		this.executorService.schedule(trigger, 1, TimeUnit.SECONDS);
+		if(!this.executorService.isShutdown()) {
+			this.executorService.schedule(trigger, 1, TimeUnit.SECONDS);
+		}
 	}
 
 	/**
@@ -217,55 +251,52 @@ public class Scheduler {
 
 		Logger log = LoggerFactory.getLogger(this.getClass());
 
-		private final Jedis jedis;
-		private final EmitterProcessor<Message<?>> emitterProcessor;
-		private final Converter<Message<?>, String> converter;
-		private final String triggerQueueName;
-		private final String messageKeyName;
-
-		public Trigger(Jedis jedis, EmitterProcessor<Message<?>> emitterProcessor) {
-			this(jedis, emitterProcessor, new JacksonMessageCoverter(), TRIGGERS_QUEUE_NAME, MESSAGE_KEY_NAME);
-		}
-
-		public Trigger(Jedis jedis, EmitterProcessor<Message<?>> emitterProcessor, Converter<Message<?>, String > converter, String triggerQueueName, String messageKeyName) {
-			this.jedis = jedis;
-			this.emitterProcessor = emitterProcessor;
-			this.converter = converter;
-			this.triggerQueueName = triggerQueueName;
-			this.messageKeyName = messageKeyName;
-		}
-
 		@Override
 		public void run() {
-			log.info("Get triggers...");
+			if(log.isTraceEnabled()) {
+				log.trace("Get triggers...");
+			}
 			Set<Tuple> triggers;
-			do {
-				triggers = jedis.zrangeByScoreWithScores(triggerQueueName, 0, System.currentTimeMillis());
-				log.info("Got {} triggers", triggers.size());
-				if (triggers.size() > 0) {
-					jedis.watch(triggerQueueName);
-					Transaction transaction = jedis.multi();
-					String firstKey = triggers.iterator().next().getElement();
-					transaction.zrem(triggerQueueName, firstKey);
-					log.info("Delete trigger...");
-					List<Object> result = transaction.exec();
-					if (!result.isEmpty() && result.get(0).equals(1L)) {
-						log.info("We are first");
-						publishMessage(firstKey);
-					} else {
-						log.info("We aren't first");
+			synchronized (mutex) {
+				do {
+					triggers = jedis.zrangeByScoreWithScores(triggerQueueName, 0, System.currentTimeMillis());
+					if(log.isTraceEnabled()) {
+						log.trace("Got triggers {}", triggers.size());
 					}
-				}
-			} while (triggers.size() > 1);
+					if (!triggers.isEmpty()) {
+						jedis.watch(triggerQueueName);
+						Transaction transaction = jedis.multi();
+						String firstKey = triggers.iterator().next().getElement();
+						transaction.zrem(triggerQueueName, firstKey);
+						if(log.isTraceEnabled()) {
+							log.trace("Delete trigger...");
+						}
+						List<Object> result = transaction.exec();
+						if (!result.isEmpty() && result.get(0).equals(1L)) {
+							if(log.isTraceEnabled()) {
+								log.trace("We are first, {}", firstKey);
+							}
+							publishMessage(firstKey);
+						} else {
+							if(log.isTraceEnabled()) {
+								log.trace("We aren't first");
+							}
+						}
+					}
+				} while (!triggers.isEmpty());
+			}
 			Scheduler.this.scheduleTrigger(this);
 		}
 
 		@SuppressWarnings("ConstantConditions")
-		private void publishMessage(String messageKey) {
-			if(jedis.hexists(messageKeyName, messageKey)) {
-				Message<?> message = converter.reverse().convert(jedis.hget(messageKeyName, messageKey));
-				log.info("Publish message {} {}", messageKey, message);
-				jedis.hdel(messageKeyName, messageKey);
+		private void publishMessage(String tocken) {
+			SchedulerTocken schedulerTocken = new SchedulerTocken(tocken);
+			if(hasMessage(schedulerTocken)) {
+				Message<?> message = getMessage(schedulerTocken);
+				if(log.isTraceEnabled()) {
+					log.trace("Publish message {} {}", tocken, message);
+				}
+				cancelMessage(schedulerTocken);
 				emitterProcessor.onNext(message);
 			}
 		}

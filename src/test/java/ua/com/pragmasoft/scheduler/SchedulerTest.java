@@ -2,6 +2,7 @@ package ua.com.pragmasoft.scheduler;
 
 import static org.junit.Assert.assertThat;
 
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
@@ -12,33 +13,34 @@ import org.joda.time.Duration;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
-import lombok.Data;
-import lombok.NonNull;
+import com.jayway.awaitility.Awaitility;
+
 import redis.clients.jedis.Jedis;
-import redis.clients.jedis.JedisPool;
 
 /**
  * Test uses Redis on localhost:6379
  */
 public class SchedulerTest {
 
-	private JedisPool jedisPool;
+	private Jedis jedis;
 	private Scheduler scheduler;
 
 	@Before
 	public void setUp() {
-		jedisPool = new JedisPool("localhost", 6379);
-		scheduler = new Scheduler(jedisPool);
-		Jedis jedis = jedisPool.getResource();
+		jedis = new Jedis("localhost", 6379);
+		scheduler = new Scheduler(jedis);
 		jedis.eval("return redis.call('FLUSHALL')");
-		jedis.close();
 		scheduler.start();
 	}
 
 	@After
 	public void shutdown() {
 		scheduler.stop();
+		jedis.close();
+		Awaitility.await().timeout(5, TimeUnit.SECONDS).until(() -> !scheduler.isRunning());
 	}
 
 	@Test
@@ -58,13 +60,14 @@ public class SchedulerTest {
 
 	@Test
 	public void test1() throws InterruptedException {
-		scheduler.messageStream().subscribe(new SequentialConsumer());
+		SequentialConsumer consumer = new SequentialConsumer();
+		scheduler.messageStream().subscribe(consumer);
 		scheduler.scheduleMessage(Duration.standardSeconds(2), new SomeMessage(1));
 		scheduler.scheduleMessage(Duration.standardSeconds(2), new SomeMessage(2));
 		scheduler.scheduleMessage(Duration.standardSeconds(2), new SomeMessage(4));
 		scheduler.scheduleMessage(Duration.standardSeconds(2), new SomeMessage(3));
 		scheduler.scheduleMessage(Duration.standardSeconds(2), new SomeMessage(5));
-		Thread.sleep(6000);
+		Awaitility.await().timeout(5, TimeUnit.SECONDS).until(() -> consumer.ints.size() == 5);
 	}
 
 	@Test
@@ -72,7 +75,7 @@ public class SchedulerTest {
 		SequentialConsumer consumer = new SequentialConsumer();
 		scheduler.messageStream().subscribe(consumer);
 		Runnable runnable = () -> {
-			Scheduler scheduler = new Scheduler(new JedisPool("localhost", 6379));
+			Scheduler scheduler = new Scheduler(new Jedis("localhost", 6379));
 			scheduler.messageStream().subscribe(consumer);
 			scheduler.start();
 		};
@@ -83,36 +86,32 @@ public class SchedulerTest {
 			scheduler.scheduleMessage(Duration.millis(1), new SomeMessage(i));
 			Thread.sleep(200);
 		}
-		assertThat(consumer.ints.size(), CoreMatchers.is(100));
-	}
-
-	@Data
-	public static class SomeMessage {
-		@NonNull
-		private int s;
+		Awaitility.await().timeout(2, TimeUnit.SECONDS).until(() -> consumer.ints.size() == 100);
 	}
 
 	public class SequentialConsumer implements Consumer<Message<?>> {
 
+		Logger log = LoggerFactory.getLogger(this.getClass());
+
 		private Set<Integer> ints;
 
 		public SequentialConsumer() {
-			this.ints = new HashSet<>();
+			this.ints = Collections.synchronizedSet(new HashSet<>());
 		}
 
 		@Override
 		public void accept(Message<?> someMessageMessage) {
 			SomeMessage message = (SomeMessage) someMessageMessage.getPayload();
 			if(ints.contains(message.getS())) {
-				System.out.println(message.getS() + " exist");
+				log.info(message.getS() + " exist");
 				System.exit(5);
 			}
 			if((System.currentTimeMillis() - someMessageMessage.getTriggerTimestamp()) > TimeUnit.SECONDS.toMillis(2)) {
-				System.out.println("Too late");
+				log.info("Too late");
 				System.exit(6);
 			}
 			ints.add(message.getS());
-			System.out.println(message);
+			log.info(message.toString());
 		}
 	}
 

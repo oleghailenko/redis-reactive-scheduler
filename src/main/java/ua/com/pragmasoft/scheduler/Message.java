@@ -36,4 +36,10 @@ public class Message<T> {
 	@NonNull
 	private long triggerTimestamp;
 
+	/**
+	 * Scheduler tocken
+	 */
+	@NonNull
+	private SchedulerTocken tocken;
+
 }
