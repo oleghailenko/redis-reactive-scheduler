@@ -109,7 +109,7 @@
 						<include>**/*</include>
 					</includes>
 					<repositoryName>redis-reactive-scheduler</repositoryName>
-					<repositoryOwner>oleghailenko</repositoryOwner>
+					<repositoryOwner>pragmasoft-ukraine</repositoryOwner>
 				</configuration>
 				<executions>
 					<execution>
