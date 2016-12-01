@@ -21,6 +21,8 @@ public class Message<T> {
 	/**
 	 * Time, when message should be fired
 	 */
+	@NonNull
+	@Wither
 	private long scheduledTimestamp;
 
 	/**

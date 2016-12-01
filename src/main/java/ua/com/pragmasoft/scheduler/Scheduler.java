@@ -166,6 +166,27 @@ public class Scheduler {
 	}
 
 	/**
+	 * Moved firing the message
+	 * @param duration Amount of time.
+	 * @param token Trigger unique identifier.
+	 */
+	public void rescheduleMessage(Duration duration, SchedulerToken token) {
+		Preconditions.checkArgument(duration != null, "duration can't be null");
+		Preconditions.checkArgument(token != null, "token can't be null");
+		if(log.isTraceEnabled()) {
+			log.trace("Reschedule message {} by {}", token, duration);
+		}
+		Message<?> message = getMessage(token);
+		message = message.withScheduledTimestamp(message.getScheduledTimestamp() + duration.getMillis());
+		synchronized (mutex) {
+			Transaction transaction = jedis.multi();
+			transaction.zincrby(triggerQueueName, duration.getMillis(), token.getToken());
+			transaction.hset(messageKeyName, token.getToken(), converter.convert(message));
+			transaction.exec();
+		}
+	}
+
+	/**
 	 * Cancel the message.
 	 *
 	 * @param schedulerToken Unique identifier. Return value of this.scheduleMessage methods.
@@ -281,7 +302,7 @@ public class Scheduler {
 							transaction.hset(messageKeyName, firstElem.getElement(), converter.convert(
 								message
 									.withAttempt(message.getAttempt() + 1)
-									.withTriggerTimestamp(new DateTime().plus(Duration.standardMinutes(5)).getMillis())
+									.withTriggerTimestamp(getCurrentTimeMills())
 								)
 							);
 							if (log.isTraceEnabled()) {

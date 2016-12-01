@@ -115,6 +115,14 @@ public class SchedulerTest {
 		DateTimeUtils.setCurrentMillisSystem();
 	}
 
+	@Test
+	public void rescheduleTest() {
+		SchedulerToken token = scheduler.scheduleMessage(Duration.standardSeconds(5), new SomeMessage(1));
+		long originalTime = scheduler.getMessage(token).getScheduledTimestamp();
+		scheduler.rescheduleMessage(Duration.standardDays(1), token);
+		assertThat(scheduler.getMessage(token).getScheduledTimestamp() - originalTime, CoreMatchers.is(Duration.standardDays(1).getMillis()));
+	}
+
 	public class SequentialConsumer implements Consumer<Message<?>> {
 
 		Logger log = LoggerFactory.getLogger(this.getClass());
