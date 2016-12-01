@@ -4,8 +4,8 @@
   <artifactId>redis-scheduler</artifactId>
   <versioning>
     <versions>
-      <version>0.0.1-SNAPSHOT</version>
+      <version>0.0.2-SNAPSHOT</version>
     </versions>
-    <lastUpdated>20161128163636</lastUpdated>
+    <lastUpdated>20161201121725</lastUpdated>
   </versioning>
 </metadata>
