@@ -57,6 +57,7 @@ public class Scheduler {
 	private EmitterProcessor<Message<?>> emitterProcessor = EmitterProcessor.<Message<?>>create().connect();
 
 	private Trigger trigger;
+	private MetricsAggregator metricsAggregator;
 
 	private volatile boolean isRunning = false;
 
@@ -103,6 +104,7 @@ public class Scheduler {
 	public void stop() {
 		Preconditions.checkState(isRunning, "Scheduler are not running.");
 		log.info("Stopping scheduler");
+		metricsAggregator = null;
 		jedis.close();
 		executorService.shutdown();
 		isRunning = false;
@@ -263,6 +265,15 @@ public class Scheduler {
 		return flux;
 	}
 
+	/**
+	 * Optional {@link MetricsAggregator}
+	 * @param metricsAggregator must be not null
+	 */
+	public void setMetricsAggregator(MetricsAggregator metricsAggregator) {
+		Preconditions.checkArgument(metricsAggregator != null, "metrixAggregator must be not null value");
+		this.metricsAggregator = metricsAggregator;
+	}
+
 	private void scheduleTrigger(Trigger trigger) {
 		if (!this.executorService.isShutdown()) {
 			this.executorService.schedule(trigger, 1, TimeUnit.SECONDS);
@@ -289,6 +300,9 @@ public class Scheduler {
 			synchronized (mutex) {
 				do {
 					jedis.watch(triggerQueueName, messageKeyName);
+					if(metricsAggregator != null) {
+						metricsAggregator.withTry();
+					}
 					triggers = jedis.zrangeByScoreWithScores(triggerQueueName, 0, getCurrentTimeMills(), 0, 1);
 					if (log.isTraceEnabled()) {
 						log.trace("Got triggers {}", triggers.size());
@@ -315,9 +329,15 @@ public class Scheduler {
 									log.trace("We are first, {}", firstElem.getElement());
 								}
 								publishMessage(firstElem.getElement());
+								if(metricsAggregator != null) {
+									metricsAggregator.withSuccess();
+								}
 							} else {
 								if (log.isTraceEnabled()) {
 									log.trace("We aren't first");
+									if(metricsAggregator != null) {
+										metricsAggregator.withFail();
+									}
 								}
 							}
 						}

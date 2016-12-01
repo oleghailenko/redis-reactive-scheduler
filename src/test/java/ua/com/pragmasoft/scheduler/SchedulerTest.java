@@ -6,6 +6,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.Set;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
@@ -121,6 +122,20 @@ public class SchedulerTest {
 		long originalTime = scheduler.getMessage(token).getScheduledTimestamp();
 		scheduler.rescheduleMessage(Duration.standardDays(1), token);
 		assertThat(scheduler.getMessage(token).getScheduledTimestamp() - originalTime, CoreMatchers.is(Duration.standardDays(1).getMillis()));
+	}
+
+	@Test
+	public void metricsAggregatorTest() throws InterruptedException {
+		MetricsAggregator aggregator = new MetricsAggregator();
+		CountDownLatch latch = new CountDownLatch(1);
+		scheduler.messageStream().subscribe(message -> {
+			latch.countDown();
+		});
+		scheduler.setMetricsAggregator(aggregator);
+		scheduler.scheduleMessage(Duration.millis(1), new SomeMessage(1));
+		latch.await();
+		assertThat(aggregator.getTries(), CoreMatchers.is(1L));
+		assertThat(aggregator.getSuccesses(), CoreMatchers.is(1L));
 	}
 
 	public class SequentialConsumer implements Consumer<Message<?>> {
