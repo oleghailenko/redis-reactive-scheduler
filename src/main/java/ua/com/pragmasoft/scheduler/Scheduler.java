@@ -118,7 +118,7 @@ public class Scheduler {
 	 * @return Trigger unique identifier. Can be used for cancel trigger. See {@link this.cancelMessage}
 	 * @throws IllegalStateException if schrduler are not running
 	 */
-	public <T> SchedulerTocken scheduleMessage(DateTime dateTime, T payload) {
+	public <T> SchedulerToken scheduleMessage(DateTime dateTime, T payload) {
 		return scheduleMessage(dateTime.getMillis(), payload);
 	}
 
@@ -131,7 +131,7 @@ public class Scheduler {
 	 * @return Trigger unique identifier. Can be used for cancel trigger. See {@link this.cancelMessage}
 	 * @throws IllegalStateException if schrduler are not running
 	 */
-	public <T> SchedulerTocken scheduleMessage(Duration duration, T payload) {
+	public <T> SchedulerToken scheduleMessage(Duration duration, T payload) {
 		return scheduleMessage(new DateTime().plus(duration.getMillis()), payload);
 	}
 
@@ -144,11 +144,11 @@ public class Scheduler {
 	 * @return Trigger unique identifier. Can be used for cancel trigger. See {@link this.cancelMessage}
 	 * @throws IllegalStateException if schrduler are not running
 	 */
-	private <T> SchedulerTocken scheduleMessage(long timestamp, T payload) {
+	private <T> SchedulerToken scheduleMessage(long timestamp, T payload) {
 		Preconditions.checkArgument(payload != null, "Payload can't be null");
 		Preconditions.checkState(isRunning, "Scheduler are not running.");
 		String id = UUID.randomUUID().toString();
-		SchedulerTocken tocken = new SchedulerTocken(id);
+		SchedulerToken tocken = new SchedulerToken(id);
 		Message<?> message = new Message<>(payload, System.currentTimeMillis(), timestamp, tocken);
 		synchronized (mutex) {
 			Transaction transaction = jedis.multi();
@@ -165,43 +165,43 @@ public class Scheduler {
 	/**
 	 * Cancel the message.
 	 *
-	 * @param schedulerTocken Unique identifier. Return value of this.scheduleMessage methods.
+	 * @param schedulerToken Unique identifier. Return value of this.scheduleMessage methods.
 	 * @throws IllegalStateException if schrduler are not running
 	 */
-	public void cancelMessage(SchedulerTocken schedulerTocken) {
+	public void cancelMessage(SchedulerToken schedulerToken) {
 		Preconditions.checkState(isRunning, "Scheduler are not running.");
 		if (log.isTraceEnabled()) {
-			log.trace("Cancel message {}", schedulerTocken);
+			log.trace("Cancel message {}", schedulerToken);
 		}
 		synchronized (mutex) {
 			Transaction transaction = jedis.multi();
-			transaction.hdel(messageKeyName, schedulerTocken.getTocken());
-			transaction.zrem(triggerQueueName, schedulerTocken.getTocken());
+			transaction.hdel(messageKeyName, schedulerToken.getToken());
+			transaction.zrem(triggerQueueName, schedulerToken.getToken());
 			transaction.exec();
 		}
 	}
 
 	/**
-	 * Check if message with {@link SchedulerTocken} scheduled.
+	 * Check if message with {@link SchedulerToken} scheduled.
 	 *
-	 * @param schedulerTocken {@link SchedulerTocken} to check
+	 * @param schedulerToken {@link SchedulerToken} to check
 	 * @return true if exist, false otherwise
 	 * @throws IllegalStateException if schrduler are not running
 	 */
-	public boolean hasMessage(SchedulerTocken schedulerTocken) {
+	public boolean hasMessage(SchedulerToken schedulerToken) {
 		Preconditions.checkState(isRunning, "Scheduler are not running.");
 		if (log.isTraceEnabled()) {
-			log.trace("Cheking is message {} exist", schedulerTocken);
+			log.trace("Cheking is message {} exist", schedulerToken);
 		}
 		synchronized (mutex) {
-			if (jedis.hexists(messageKeyName, schedulerTocken.getTocken())) {
+			if (jedis.hexists(messageKeyName, schedulerToken.getToken())) {
 				if (log.isTraceEnabled()) {
-					log.trace("Message {} exist", schedulerTocken);
+					log.trace("Message {} exist", schedulerToken);
 				}
 				return true;
 			} else {
 				if (log.isTraceEnabled()) {
-					log.trace("Message {} does not exist", schedulerTocken);
+					log.trace("Message {} does not exist", schedulerToken);
 				}
 				return false;
 			}
@@ -209,21 +209,21 @@ public class Scheduler {
 	}
 
 	/**
-	 * Returns message by {@link SchedulerTocken}
+	 * Returns message by {@link SchedulerToken}
 	 *
-	 * @param schedulerTocken {@link SchedulerTocken}
-	 * @return Message<>, or null is message with {@link SchedulerTocken} does not exist
+	 * @param schedulerToken {@link SchedulerToken}
+	 * @return Message<>, or null is message with {@link SchedulerToken} does not exist
 	 * @throws IllegalStateException if schrduler are not running
 	 */
-	public Message<?> getMessage(SchedulerTocken schedulerTocken) {
+	public Message<?> getMessage(SchedulerToken schedulerToken) {
 		Preconditions.checkState(isRunning, "Scheduler are not running.");
 		if (log.isTraceEnabled()) {
-			log.trace("Getting message {}", schedulerTocken);
+			log.trace("Getting message {}", schedulerToken);
 		}
-		if (hasMessage(schedulerTocken)) {
+		if (hasMessage(schedulerToken)) {
 			String serializedMessage;
 			synchronized (mutex) {
-				serializedMessage = jedis.hget(messageKeyName, schedulerTocken.getTocken());
+				serializedMessage = jedis.hget(messageKeyName, schedulerToken.getToken());
 			}
 			return converter.reverse().convert(serializedMessage);
 		}

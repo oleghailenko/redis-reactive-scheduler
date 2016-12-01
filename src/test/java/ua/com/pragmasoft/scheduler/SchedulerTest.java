@@ -46,17 +46,17 @@ public class SchedulerTest {
 
 	@Test
 	public void scheduleTest() {
-		SchedulerTocken schedulerTocken = scheduler.scheduleMessage(Duration.standardSeconds(2), new SomeMessage(1));
-		assertThat(schedulerTocken, CoreMatchers.notNullValue());
-		assertThat(scheduler.hasMessage(schedulerTocken), CoreMatchers.is(true));
-		assertThat(scheduler.getMessage(schedulerTocken).getPayload(), CoreMatchers.is(new SomeMessage(1)));
+		SchedulerToken schedulerToken = scheduler.scheduleMessage(Duration.standardSeconds(2), new SomeMessage(1));
+		assertThat(schedulerToken, CoreMatchers.notNullValue());
+		assertThat(scheduler.hasMessage(schedulerToken), CoreMatchers.is(true));
+		assertThat(scheduler.getMessage(schedulerToken).getPayload(), CoreMatchers.is(new SomeMessage(1)));
 	}
 
 	@Test
 	public void cancelTest() {
-		SchedulerTocken schedulerTocken = scheduler.scheduleMessage(Duration.standardSeconds(1), new SomeMessage(1));
-		scheduler.cancelMessage(schedulerTocken);
-		assertThat(scheduler.hasMessage(schedulerTocken), CoreMatchers.is(false));
+		SchedulerToken schedulerToken = scheduler.scheduleMessage(Duration.standardSeconds(1), new SomeMessage(1));
+		scheduler.cancelMessage(schedulerToken);
+		assertThat(scheduler.hasMessage(schedulerToken), CoreMatchers.is(false));
 	}
 
 	@Test
@@ -124,7 +124,7 @@ public class SchedulerTest {
 				log.info("Too late");
 				System.exit(6);
 			}
-			scheduler.cancelMessage(someMessageMessage.getTocken());
+			scheduler.cancelMessage(someMessageMessage.getToken());
 			ints.add(message.getS());
 			log.info(message.toString());
 		}

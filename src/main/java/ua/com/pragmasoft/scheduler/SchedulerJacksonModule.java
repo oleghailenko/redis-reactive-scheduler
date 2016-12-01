@@ -14,7 +14,7 @@ public class SchedulerJacksonModule extends SimpleModule {
 
 	@Override
 	public void setupModule(SetupContext context) {
-		context.setMixInAnnotations(SchedulerTocken.class, TockenMixin.class);
+		context.setMixInAnnotations(SchedulerToken.class, TokenMixin.class);
 		context.setMixInAnnotations(Message.class, TypedPayload.class);
 	}
 
@@ -24,15 +24,15 @@ public class SchedulerJacksonModule extends SimpleModule {
 		creatorVisibility = JsonAutoDetect.Visibility.NONE,
 		fieldVisibility = JsonAutoDetect.Visibility.ANY
 	)
-	private abstract static class TockenMixin {
+	private abstract static class TokenMixin {
 
 		@JsonCreator
-		public TockenMixin(String tocken) {
+		public TokenMixin(String tocken) {
 
 		}
 
 		@JsonValue
-		public abstract String getTocken();
+		public abstract String getToken();
 	}
 
 	private abstract static class TypedPayload<T> {

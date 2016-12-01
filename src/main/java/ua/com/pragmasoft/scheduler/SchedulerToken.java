@@ -7,7 +7,7 @@ import lombok.Value;
 
 @Value
 @AllArgsConstructor(access = AccessLevel.PACKAGE)
-public class SchedulerTocken {
+public class SchedulerToken {
 	@NonNull
-	private String tocken;
+	private String token;
 }

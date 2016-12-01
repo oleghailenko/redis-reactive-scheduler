@@ -1,13 +1,5 @@
 package ua.com.pragmasoft.scheduler;
 
-import java.util.Date;
-import java.util.HashMap;
-import java.util.Map;
-
-import com.fasterxml.jackson.annotation.JsonAutoDetect;
-import com.google.common.base.Preconditions;
-import com.google.common.collect.ImmutableMap;
-
 import lombok.*;
 
 
@@ -37,9 +29,9 @@ public class Message<T> {
 	private long triggerTimestamp;
 
 	/**
-	 * Scheduler tocken
+	 * Scheduler token
 	 */
 	@NonNull
-	private SchedulerTocken tocken;
+	private SchedulerToken token;
 
 }
