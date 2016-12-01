@@ -1,8 +1,6 @@
 package ua.com.pragmasoft.scheduler;
 
 import java.util.Date;
-import java.util.List;
-import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -21,7 +19,6 @@ import reactor.core.publisher.EmitterProcessor;
 import reactor.core.publisher.Flux;
 import redis.clients.jedis.Jedis;
 import redis.clients.jedis.Transaction;
-import redis.clients.jedis.Tuple;
 
 /**
  * Simple destributive Scheduler implemenration based on Redis.
@@ -73,9 +70,9 @@ public class Scheduler {
 	/**
 	 * Build scheduler with provided parameters
 	 *
-	 * @param jedis        Jedis connection
-	 * @param converter        Implementation of {@link Converter} from {@link Message<>} to {@link String} and vice versa
-	 * @param namespace        Namespace of keys in Redis
+	 * @param jedis     Jedis connection
+	 * @param converter Implementation of {@link Converter} from {@link Message<>} to {@link String} and vice versa
+	 * @param namespace Namespace of keys in Redis
 	 */
 	public Scheduler(Jedis jedis, Converter<Message<?>, String> converter, String namespace) {
 		this.jedis = jedis;
@@ -116,8 +113,8 @@ public class Scheduler {
 	 * Schedules message with payload in particular time
 	 *
 	 * @param dateTime Time, when message should be thrown
-	 * @param payload   Payload
-	 * @param <T>       Class of payload
+	 * @param payload  Payload
+	 * @param <T>      Class of payload
 	 * @return Trigger unique identifier. Can be used for cancel trigger. See {@link this.cancelMessage}
 	 * @throws IllegalStateException if schrduler are not running
 	 */
@@ -128,7 +125,7 @@ public class Scheduler {
 	/**
 	 * Schedules message with payload in particular time
 	 *
-	 * @param duration    Delay from now, when message should be thrown
+	 * @param duration Delay from now, when message should be thrown
 	 * @param payload  Payload
 	 * @param <T>      Class of payload
 	 * @return Trigger unique identifier. Can be used for cancel trigger. See {@link this.cancelMessage}
@@ -159,7 +156,7 @@ public class Scheduler {
 			transaction.hset(messageKeyName, id, converter.convert(message));
 			transaction.exec();
 		}
-		if(log.isTraceEnabled()) {
+		if (log.isTraceEnabled()) {
 			log.trace("Schedule message {} at {}", message, new Date(timestamp));
 		}
 		return tocken;
@@ -167,12 +164,13 @@ public class Scheduler {
 
 	/**
 	 * Cancel the message.
+	 *
 	 * @param schedulerTocken Unique identifier. Return value of this.scheduleMessage methods.
 	 * @throws IllegalStateException if schrduler are not running
 	 */
 	public void cancelMessage(SchedulerTocken schedulerTocken) {
 		Preconditions.checkState(isRunning, "Scheduler are not running.");
-		if(log.isTraceEnabled()) {
+		if (log.isTraceEnabled()) {
 			log.trace("Cancel message {}", schedulerTocken);
 		}
 		synchronized (mutex) {
@@ -185,24 +183,25 @@ public class Scheduler {
 
 	/**
 	 * Check if message with {@link SchedulerTocken} scheduled.
+	 *
 	 * @param schedulerTocken {@link SchedulerTocken} to check
 	 * @return true if exist, false otherwise
 	 * @throws IllegalStateException if schrduler are not running
 	 */
 	public boolean hasMessage(SchedulerTocken schedulerTocken) {
 		Preconditions.checkState(isRunning, "Scheduler are not running.");
-		if(log.isTraceEnabled()) {
+		if (log.isTraceEnabled()) {
 			log.trace("Cheking is message {} exist", schedulerTocken);
 		}
 		synchronized (mutex) {
-			if(jedis.hexists(messageKeyName, schedulerTocken.getTocken())) {
-				if(log.isTraceEnabled()) {
+			if (jedis.hexists(messageKeyName, schedulerTocken.getTocken())) {
+				if (log.isTraceEnabled()) {
 					log.trace("Message {} exist", schedulerTocken);
 				}
 				return true;
 			} else {
-				if(log.isTraceEnabled()) {
-					log.trace("Message {} dow not exist", schedulerTocken);
+				if (log.isTraceEnabled()) {
+					log.trace("Message {} does not exist", schedulerTocken);
 				}
 				return false;
 			}
@@ -211,16 +210,17 @@ public class Scheduler {
 
 	/**
 	 * Returns message by {@link SchedulerTocken}
+	 *
 	 * @param schedulerTocken {@link SchedulerTocken}
 	 * @return Message<>, or null is message with {@link SchedulerTocken} does not exist
 	 * @throws IllegalStateException if schrduler are not running
 	 */
 	public Message<?> getMessage(SchedulerTocken schedulerTocken) {
 		Preconditions.checkState(isRunning, "Scheduler are not running.");
-		if(log.isTraceEnabled()) {
+		if (log.isTraceEnabled()) {
 			log.trace("Getting message {}", schedulerTocken);
 		}
-		if(hasMessage(schedulerTocken)) {
+		if (hasMessage(schedulerTocken)) {
 			String serializedMessage;
 			synchronized (mutex) {
 				serializedMessage = jedis.hget(messageKeyName, schedulerTocken.getTocken());
@@ -232,6 +232,7 @@ public class Scheduler {
 
 	/**
 	 * Returns {@link Flux} You can listen.
+	 *
 	 * @return flux
 	 */
 	public Flux<Message<?>> messageStream() {
@@ -239,7 +240,7 @@ public class Scheduler {
 	}
 
 	private void scheduleTrigger(Trigger trigger) {
-		if(!this.executorService.isShutdown()) {
+		if (!this.executorService.isShutdown()) {
 			this.executorService.schedule(trigger, 1, TimeUnit.SECONDS);
 		}
 	}
@@ -253,52 +254,56 @@ public class Scheduler {
 
 		@Override
 		public void run() {
-			if(log.isTraceEnabled()) {
+			if (log.isTraceEnabled()) {
 				log.trace("Get triggers...");
 			}
-			Set<Tuple> triggers;
+			Message<?> nearestMessage;
 			synchronized (mutex) {
 				do {
-					triggers = jedis.zrangeByScoreWithScores(triggerQueueName, 0, System.currentTimeMillis());
-					if(log.isTraceEnabled()) {
-						log.trace("Got triggers {}", triggers.size());
+					nearestMessage = getNearestMessage(System.currentTimeMillis());
+					if (nearestMessage == null) {
+						break;
+					} else {
+						publishMessage(nearestMessage);
 					}
-					if (!triggers.isEmpty()) {
-						jedis.watch(triggerQueueName);
-						Transaction transaction = jedis.multi();
-						String firstKey = triggers.iterator().next().getElement();
-						transaction.zrem(triggerQueueName, firstKey);
-						if(log.isTraceEnabled()) {
-							log.trace("Delete trigger...");
-						}
-						List<Object> result = transaction.exec();
-						if (!result.isEmpty() && result.get(0).equals(1L)) {
-							if(log.isTraceEnabled()) {
-								log.trace("We are first, {}", firstKey);
-							}
-							publishMessage(firstKey);
-						} else {
-							if(log.isTraceEnabled()) {
-								log.trace("We aren't first");
-							}
-						}
-					}
-				} while (!triggers.isEmpty());
+				} while (true);
 			}
 			Scheduler.this.scheduleTrigger(this);
 		}
 
-		@SuppressWarnings("ConstantConditions")
-		private void publishMessage(String tocken) {
-			SchedulerTocken schedulerTocken = new SchedulerTocken(tocken);
-			if(hasMessage(schedulerTocken)) {
-				Message<?> message = getMessage(schedulerTocken);
-				if(log.isTraceEnabled()) {
-					log.trace("Publish message {} {}", tocken, message);
-				}
-				cancelMessage(schedulerTocken);
-				emitterProcessor.onNext(message);
+		private Message<?> getNearestMessage(long currentTimestamp) {
+			Object nearestSerializesMessage = jedis.eval(luaScript, 3, String.valueOf(currentTimestamp), triggerQueueName, messageKeyName);
+			if (nearestSerializesMessage == null) {
+				return null;
+			} else {
+				String serializedMessage = (String) nearestSerializesMessage;
+				return converter.reverse().convert(serializedMessage);
 			}
 		}
+
+		@SuppressWarnings("ConstantConditions")
+		private void publishMessage(Message<?> message) {
+			if (log.isTraceEnabled()) {
+				log.trace("Publish message {}", message);
+			}
+			emitterProcessor.onNext(message);
+		}
+
+		private String luaScript = "local currentTimeMS = KEYS[1]\n" +
+			"local triggerQueue = KEYS[2]\n" +
+			"local jobSet = KEYS[3]\n" +
+			"local second = 1000\n" +
+			"local function foundJob(jobID)\n" +
+			"\tredis.call('ZADD', triggerQueue, currentTimeMS + 5*second, jobID)\n" +
+			"\treturn redis.call('HGET', jobSet, jobID)\n" +
+			"end\n" +
+			"local function findNextJob()\n" +
+			"\tlocal result\n" +
+			"\tresult = redis.call( 'ZRANGEBYSCORE', triggerQueue, 0, currentTimeMS, 'LIMIT',0,1 )\n" +
+			"\tif result[1] ~= nil then return foundJob(result[1]) end\n" +
+			"\treturn nil\n" +
+			"end\n" +
+			"return findNextJob()";
+
 	}
 }

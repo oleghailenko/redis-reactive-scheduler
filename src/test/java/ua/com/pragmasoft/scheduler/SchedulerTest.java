@@ -6,6 +6,7 @@ import java.util.Collections;
 import java.util.HashSet;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 
 import org.hamcrest.CoreMatchers;
@@ -89,6 +90,19 @@ public class SchedulerTest {
 		Awaitility.await().timeout(2, TimeUnit.SECONDS).until(() -> consumer.ints.size() == 100);
 	}
 
+	@Test
+	public void acknowledgeTest() {
+		AtomicInteger integer = new AtomicInteger(0);
+		scheduler.messageStream().subscribe(message -> {
+			assertThat(message.getPayload(), CoreMatchers.instanceOf(SomeMessage.class));
+			assertThat(((SomeMessage) message.getPayload()).getS(), CoreMatchers.is(1));
+			integer.incrementAndGet();
+		});
+		scheduler.scheduleMessage(Duration.standardSeconds(1), new SomeMessage(1));
+		Awaitility.await().timeout(3, TimeUnit.SECONDS).until(() -> integer.get() == 1);
+		Awaitility.await().timeout(8, TimeUnit.SECONDS).until(() -> integer.get() == 2);
+	}
+
 	public class SequentialConsumer implements Consumer<Message<?>> {
 
 		Logger log = LoggerFactory.getLogger(this.getClass());
@@ -110,6 +124,7 @@ public class SchedulerTest {
 				log.info("Too late");
 				System.exit(6);
 			}
+			scheduler.cancelMessage(someMessageMessage.getTocken());
 			ints.add(message.getS());
 			log.info(message.toString());
 		}
