@@ -11,6 +11,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 
 import org.hamcrest.CoreMatchers;
+import org.joda.time.DateTimeUtils;
 import org.joda.time.Duration;
 import org.junit.After;
 import org.junit.Before;
@@ -43,6 +44,7 @@ public class SchedulerTest {
 		scheduler.stop();
 		jedis.close();
 		Awaitility.await().timeout(5, TimeUnit.SECONDS).until(() -> !scheduler.isRunning());
+		DateTimeUtils.setCurrentMillisSystem();
 	}
 
 	@Test
@@ -75,23 +77,27 @@ public class SchedulerTest {
 	@Test
 	public void test2() throws InterruptedException {
 		ArrayList<Scheduler> schedulers = new ArrayList<>();
-		SequentialConsumer consumer = new SequentialConsumer();
-		scheduler.messageStream().subscribe(consumer);
-		Runnable runnable = () -> {
-			Scheduler scheduler = new Scheduler(new Jedis("localhost", 6379));
+		try {
+			SequentialConsumer consumer = new SequentialConsumer();
 			scheduler.messageStream().subscribe(consumer);
-			scheduler.start();
-			schedulers.add(scheduler);
-		};
-		for(int i = 0; i < 10; i++) {
-			new Thread(runnable).start();
+			Runnable runnable = () -> {
+				Scheduler scheduler = new Scheduler(new Jedis("localhost", 6379));
+				scheduler.messageStream().subscribe(consumer);
+				scheduler.start();
+				schedulers.add(scheduler);
+			};
+			for(int i = 0; i < 10; i++) {
+				new Thread(runnable).start();
+			}
+			for (int i = 0; i<100; i++) {
+				scheduler.scheduleMessage(Duration.millis(1), new SomeMessage(i));
+				Thread.sleep(200);
+			}
+			Awaitility.await().timeout(2, TimeUnit.SECONDS).until(() -> consumer.ints.size() == 100);
+		} finally {
+			schedulers.forEach(Scheduler::stop);
 		}
-		for (int i = 0; i<100; i++) {
-			scheduler.scheduleMessage(Duration.millis(1), new SomeMessage(i));
-			Thread.sleep(200);
-		}
-		Awaitility.await().timeout(2, TimeUnit.SECONDS).until(() -> consumer.ints.size() == 100);
-		schedulers.forEach(Scheduler::stop);
+
 	}
 
 	@Test
@@ -104,7 +110,9 @@ public class SchedulerTest {
 		});
 		scheduler.scheduleMessage(Duration.standardSeconds(1), new SomeMessage(1));
 		Awaitility.await().timeout(3, TimeUnit.SECONDS).until(() -> integer.get() == 1);
-		Awaitility.await().timeout(8, TimeUnit.SECONDS).until(() -> integer.get() == 2);
+		DateTimeUtils.setCurrentMillisOffset(Duration.standardMinutes(5).getMillis());
+		Awaitility.await().timeout(3, TimeUnit.SECONDS).until(() -> integer.get() == 2);
+		DateTimeUtils.setCurrentMillisSystem();
 	}
 
 	public class SequentialConsumer implements Consumer<Message<?>> {
@@ -121,11 +129,11 @@ public class SchedulerTest {
 		public void accept(Message<?> someMessageMessage) {
 			SomeMessage message = (SomeMessage) someMessageMessage.getPayload();
 			if(ints.contains(message.getS())) {
-				log.info(message.getS() + " exist");
+				log.error(message.getS() + " exist");
 				System.exit(5);
 			}
 			if((System.currentTimeMillis() - someMessageMessage.getTriggerTimestamp()) > TimeUnit.SECONDS.toMillis(2)) {
-				log.info("Too late");
+				log.error("Too late");
 				System.exit(6);
 			}
 			scheduler.cancelMessage(someMessageMessage.getToken());

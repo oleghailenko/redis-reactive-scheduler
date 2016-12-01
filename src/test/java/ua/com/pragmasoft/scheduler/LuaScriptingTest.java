@@ -50,7 +50,7 @@ public class LuaScriptingTest {
 		String messageSet = "scheduler:defaut:message";
 		long currentTime = System.currentTimeMillis();
 		String jobId = "job1";
-		String message = messageCoverter.convert(new Message<>(new SomeMessage(5), System.currentTimeMillis(), currentTime, new SchedulerToken(jobId)));
+		String message = messageCoverter.convert(new Message<>(new SomeMessage(5), System.currentTimeMillis(), currentTime, new SchedulerToken(jobId), 1));
 		jedis.zadd(triggerQueue, currentTime, jobId);
 		jedis.hset(messageSet, jobId, message);
 		Object result = jedis.eval(getJobLuaScript, 4, String.valueOf(currentTime), triggerQueue, workingQueue, messageSet);

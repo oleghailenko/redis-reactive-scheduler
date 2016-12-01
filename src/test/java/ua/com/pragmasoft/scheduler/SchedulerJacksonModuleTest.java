@@ -16,7 +16,7 @@ public class SchedulerJacksonModuleTest {
 	public void test() throws IOException {
 		ObjectMapper mapper = new ObjectMapper();
 		mapper.registerModule(new SchedulerJacksonModule());
-		Message<SomeMessage> original =new Message<>(new SomeMessage(50), 500, 500, new SchedulerToken("tocken"));
+		Message<SomeMessage> original =new Message<>(new SomeMessage(50), 500, 500, new SchedulerToken("token"), 1);
 		String serialized = mapper.writeValueAsString(original);
 		Message<SomeMessage> deserialized = mapper.readValue(serialized, Message.class);
 		assertThat(original, CoreMatchers.is(deserialized));

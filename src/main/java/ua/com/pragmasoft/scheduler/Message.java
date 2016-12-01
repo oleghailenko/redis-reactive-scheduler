@@ -1,6 +1,7 @@
 package ua.com.pragmasoft.scheduler;
 
 import lombok.*;
+import lombok.experimental.Wither;
 
 
 /**
@@ -26,6 +27,7 @@ public class Message<T> {
 	 * Time, when message has been schduled
 	 */
 	@NonNull
+	@Wither
 	private long triggerTimestamp;
 
 	/**
@@ -33,5 +35,12 @@ public class Message<T> {
 	 */
 	@NonNull
 	private SchedulerToken token;
+
+	/**
+	 * number of attempts
+	 */
+	@NonNull
+	@Wither
+	private int attempt;
 
 }

@@ -1,6 +1,8 @@
 package ua.com.pragmasoft.scheduler;
 
 import java.util.Date;
+import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -19,6 +21,7 @@ import reactor.core.publisher.EmitterProcessor;
 import reactor.core.publisher.Flux;
 import redis.clients.jedis.Jedis;
 import redis.clients.jedis.Transaction;
+import redis.clients.jedis.Tuple;
 
 /**
  * Simple destributive Scheduler implemenration based on Redis.
@@ -149,7 +152,7 @@ public class Scheduler {
 		Preconditions.checkState(isRunning, "Scheduler are not running.");
 		String id = UUID.randomUUID().toString();
 		SchedulerToken tocken = new SchedulerToken(id);
-		Message<?> message = new Message<>(payload, System.currentTimeMillis(), timestamp, tocken);
+		Message<?> message = new Message<>(payload, getCurrentTimeMills(), timestamp, tocken, 1);
 		synchronized (mutex) {
 			Transaction transaction = jedis.multi();
 			transaction.zadd(triggerQueueName, timestamp, id);
@@ -245,6 +248,10 @@ public class Scheduler {
 		}
 	}
 
+	private long getCurrentTimeMills() {
+		return new DateTime().getMillis();
+	}
+
 	/**
 	 * Simple Redis Sorted Set listener
 	 */
@@ -257,53 +264,58 @@ public class Scheduler {
 			if (log.isTraceEnabled()) {
 				log.trace("Get triggers...");
 			}
-			Message<?> nearestMessage;
+			Set<Tuple> triggers;
 			synchronized (mutex) {
 				do {
-					nearestMessage = getNearestMessage(System.currentTimeMillis());
-					if (nearestMessage == null) {
-						break;
-					} else {
-						publishMessage(nearestMessage);
+					jedis.watch(triggerQueueName, messageKeyName);
+					triggers = jedis.zrangeByScoreWithScores(triggerQueueName, 0, getCurrentTimeMills(), 0, 1);
+					if (log.isTraceEnabled()) {
+						log.trace("Got triggers {}", triggers.size());
 					}
-				} while (true);
+					if (!triggers.isEmpty()) {
+						Tuple firstElem = triggers.iterator().next();
+						Message<?> message = getMessage(new SchedulerToken(firstElem.getElement()));
+						if (message.getAttempt() < 5) {
+							Transaction transaction = jedis.multi();
+							transaction.zincrby(triggerQueueName, TimeUnit.MINUTES.toMillis(5), firstElem.getElement());
+							transaction.hset(messageKeyName, firstElem.getElement(), converter.convert(
+								message
+									.withAttempt(message.getAttempt() + 1)
+									.withTriggerTimestamp(new DateTime().plus(Duration.standardMinutes(5)).getMillis())
+								)
+							);
+							if (log.isTraceEnabled()) {
+								log.trace("Reschedule trigger...");
+							}
+							List<Object> result = transaction.exec();
+							log.trace("{} {}", result.toString(), firstElem.getElement());
+							if (!result.isEmpty()) {
+								if (log.isTraceEnabled()) {
+									log.trace("We are first, {}", firstElem.getElement());
+								}
+								publishMessage(firstElem.getElement());
+							} else {
+								if (log.isTraceEnabled()) {
+									log.trace("We aren't first");
+								}
+							}
+						}
+					}
+				} while (!triggers.isEmpty());
 			}
 			Scheduler.this.scheduleTrigger(this);
 		}
 
-		private Message<?> getNearestMessage(long currentTimestamp) {
-			Object nearestSerializesMessage = jedis.eval(luaScript, 3, String.valueOf(currentTimestamp), triggerQueueName, messageKeyName);
-			if (nearestSerializesMessage == null) {
-				return null;
-			} else {
-				String serializedMessage = (String) nearestSerializesMessage;
-				return converter.reverse().convert(serializedMessage);
-			}
-		}
-
 		@SuppressWarnings("ConstantConditions")
-		private void publishMessage(Message<?> message) {
-			if (log.isTraceEnabled()) {
-				log.trace("Publish message {}", message);
+		private void publishMessage(String tocken) {
+			SchedulerToken schedulerTocken = new SchedulerToken(tocken);
+			Message<?> message = getMessage(schedulerTocken);
+			if (message != null) {
+				if (log.isTraceEnabled()) {
+					log.trace("Publish message {} {}", tocken, message);
+				}
+				emitterProcessor.onNext(message);
 			}
-			emitterProcessor.onNext(message);
 		}
-
-		private String luaScript = "local currentTimeMS = KEYS[1]\n" +
-			"local triggerQueue = KEYS[2]\n" +
-			"local jobSet = KEYS[3]\n" +
-			"local second = 1000\n" +
-			"local function foundJob(jobID)\n" +
-			"\tredis.call('ZADD', triggerQueue, currentTimeMS + 5*second, jobID)\n" +
-			"\treturn redis.call('HGET', jobSet, jobID)\n" +
-			"end\n" +
-			"local function findNextJob()\n" +
-			"\tlocal result\n" +
-			"\tresult = redis.call( 'ZRANGEBYSCORE', triggerQueue, 0, currentTimeMS, 'LIMIT',0,1 )\n" +
-			"\tif result[1] ~= nil then return foundJob(result[1]) end\n" +
-			"\treturn nil\n" +
-			"end\n" +
-			"return findNextJob()";
-
 	}
 }
