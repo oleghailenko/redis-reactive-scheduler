@@ -2,6 +2,7 @@ package ua.com.pragmasoft.scheduler;
 
 import static org.junit.Assert.assertThat;
 
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.Set;
@@ -73,12 +74,14 @@ public class SchedulerTest {
 
 	@Test
 	public void test2() throws InterruptedException {
+		ArrayList<Scheduler> schedulers = new ArrayList<>();
 		SequentialConsumer consumer = new SequentialConsumer();
 		scheduler.messageStream().subscribe(consumer);
 		Runnable runnable = () -> {
 			Scheduler scheduler = new Scheduler(new Jedis("localhost", 6379));
 			scheduler.messageStream().subscribe(consumer);
 			scheduler.start();
+			schedulers.add(scheduler);
 		};
 		for(int i = 0; i < 10; i++) {
 			new Thread(runnable).start();
@@ -88,6 +91,7 @@ public class SchedulerTest {
 			Thread.sleep(200);
 		}
 		Awaitility.await().timeout(2, TimeUnit.SECONDS).until(() -> consumer.ints.size() == 100);
+		schedulers.forEach(Scheduler::stop);
 	}
 
 	@Test
