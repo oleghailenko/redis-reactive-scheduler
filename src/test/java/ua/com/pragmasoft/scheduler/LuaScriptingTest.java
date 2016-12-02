@@ -6,9 +6,12 @@ import org.hamcrest.CoreMatchers;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
+import org.junit.experimental.categories.Category;
 
+import junit.IntegrationTest;
 import redis.clients.jedis.Jedis;
 
+@Category(IntegrationTest.class)
 public class LuaScriptingTest {
 
 

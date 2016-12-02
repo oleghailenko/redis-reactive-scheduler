@@ -1,12 +1,14 @@
 package ua.com.pragmasoft.scheduler;
 
 import lombok.Getter;
+import lombok.ToString;
 
 /**
  *  Metrics aggregator.
  *  Holds number of tries, successes and fails
  */
 @Getter
+@ToString
 public class MetricsAggregator {
 
 	private long tries;

@@ -17,16 +17,19 @@ import org.joda.time.Duration;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
+import org.junit.experimental.categories.Category;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.jayway.awaitility.Awaitility;
 
+import junit.IntegrationTest;
 import redis.clients.jedis.Jedis;
 
 /**
  * Test uses Redis on localhost:6379
  */
+@Category(IntegrationTest.class)
 public class SchedulerTest {
 
 	private Jedis jedis;
@@ -77,6 +80,7 @@ public class SchedulerTest {
 
 	@Test
 	public void test2() throws InterruptedException {
+		int numEvents = 100;
 		ArrayList<Scheduler> schedulers = new ArrayList<>();
 		try {
 			SequentialConsumer consumer = new SequentialConsumer();
@@ -90,11 +94,11 @@ public class SchedulerTest {
 			for(int i = 0; i < 10; i++) {
 				new Thread(runnable).start();
 			}
-			for (int i = 0; i<100; i++) {
+			for (int i = 0; i<numEvents; i++) {
 				scheduler.scheduleMessage(Duration.millis(1), new SomeMessage(i));
 				Thread.sleep(200);
 			}
-			Awaitility.await().timeout(2, TimeUnit.SECONDS).until(() -> consumer.ints.size() == 100);
+			Awaitility.await().timeout(2, TimeUnit.SECONDS).until(() -> consumer.ints.size() == numEvents);
 		} finally {
 			schedulers.forEach(Scheduler::stop);
 		}

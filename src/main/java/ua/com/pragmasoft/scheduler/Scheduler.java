@@ -156,10 +156,13 @@ public class Scheduler {
 		SchedulerToken tocken = new SchedulerToken(id);
 		Message<?> message = new Message<>(payload, getCurrentTimeMills(), timestamp, tocken, 1);
 		synchronized (mutex) {
-			Transaction transaction = jedis.multi();
-			transaction.zadd(triggerQueueName, timestamp, id);
-			transaction.hset(messageKeyName, id, converter.convert(message));
-			transaction.exec();
+			List<Object> result;
+			do {
+				Transaction transaction = jedis.multi();
+				transaction.zadd(triggerQueueName, timestamp, id);
+				transaction.hset(messageKeyName, id, converter.convert(message));
+				result = transaction.exec();
+			} while (result.isEmpty());
 		}
 		if (log.isTraceEnabled()) {
 			log.trace("Schedule message {} at {}", message, new Date(timestamp));
@@ -169,22 +172,26 @@ public class Scheduler {
 
 	/**
 	 * Moved firing the message
+	 *
 	 * @param duration Amount of time.
-	 * @param token Trigger unique identifier.
+	 * @param token    Trigger unique identifier.
 	 */
 	public void rescheduleMessage(Duration duration, SchedulerToken token) {
 		Preconditions.checkArgument(duration != null, "duration can't be null");
 		Preconditions.checkArgument(token != null, "token can't be null");
-		if(log.isTraceEnabled()) {
+		if (log.isTraceEnabled()) {
 			log.trace("Reschedule message {} by {}", token, duration);
 		}
 		Message<?> message = getMessage(token);
 		message = message.withScheduledTimestamp(message.getScheduledTimestamp() + duration.getMillis());
 		synchronized (mutex) {
-			Transaction transaction = jedis.multi();
-			transaction.zincrby(triggerQueueName, duration.getMillis(), token.getToken());
-			transaction.hset(messageKeyName, token.getToken(), converter.convert(message));
-			transaction.exec();
+			List<Object> result;
+			do {
+				Transaction transaction = jedis.multi();
+				transaction.zincrby(triggerQueueName, duration.getMillis(), token.getToken());
+				transaction.hset(messageKeyName, token.getToken(), converter.convert(message));
+				result = transaction.exec();
+			} while (result.isEmpty());
 		}
 	}
 
@@ -200,10 +207,14 @@ public class Scheduler {
 			log.trace("Cancel message {}", schedulerToken);
 		}
 		synchronized (mutex) {
-			Transaction transaction = jedis.multi();
-			transaction.hdel(messageKeyName, schedulerToken.getToken());
-			transaction.zrem(triggerQueueName, schedulerToken.getToken());
-			transaction.exec();
+			List<Object> result;
+			do {
+				Transaction transaction = jedis.multi();
+				transaction.hdel(messageKeyName, schedulerToken.getToken());
+				transaction.zrem(triggerQueueName, schedulerToken.getToken());
+				result = transaction.exec();
+			} while (result.isEmpty());
+
 		}
 	}
 
@@ -267,6 +278,7 @@ public class Scheduler {
 
 	/**
 	 * Optional {@link MetricsAggregator}
+	 *
 	 * @param metricsAggregator must be not null
 	 */
 	public void setMetricsAggregator(MetricsAggregator metricsAggregator) {
@@ -284,6 +296,30 @@ public class Scheduler {
 		return new DateTime().getMillis();
 	}
 
+	private void notifyTry() {
+		if (metricsAggregator != null) {
+			metricsAggregator.withTry();
+		}
+	}
+
+	private void notifySuccess() {
+		if (metricsAggregator != null) {
+			metricsAggregator.withSuccess();
+		}
+	}
+
+	private void notifyFail() {
+		if (metricsAggregator != null) {
+			metricsAggregator.withFail();
+		}
+	}
+
+	private void trace(String format, Object... arguments) {
+		if (log.isTraceEnabled()) {
+			log.trace(format, arguments);
+		}
+	}
+
 	/**
 	 * Simple Redis Sorted Set listener
 	 */
@@ -293,24 +329,18 @@ public class Scheduler {
 
 		@Override
 		public void run() {
-			if (log.isTraceEnabled()) {
-				log.trace("Get triggers...");
-			}
+			trace("Get triggers...");
 			Set<Tuple> triggers;
 			synchronized (mutex) {
 				do {
 					jedis.watch(triggerQueueName, messageKeyName);
-					if(metricsAggregator != null) {
-						metricsAggregator.withTry();
-					}
+					notifyTry();
 					triggers = jedis.zrangeByScoreWithScores(triggerQueueName, 0, getCurrentTimeMills(), 0, 1);
-					if (log.isTraceEnabled()) {
-						log.trace("Got triggers {}", triggers.size());
-					}
+					trace("Got triggers {}", triggers.size());
 					if (!triggers.isEmpty()) {
 						Tuple firstElem = triggers.iterator().next();
 						Message<?> message = getMessage(new SchedulerToken(firstElem.getElement()));
-						if (message.getAttempt() < 5) {
+						if (message != null && message.getAttempt() < 5) {
 							Transaction transaction = jedis.multi();
 							transaction.zincrby(triggerQueueName, TimeUnit.MINUTES.toMillis(5), firstElem.getElement());
 							transaction.hset(messageKeyName, firstElem.getElement(), converter.convert(
@@ -319,28 +349,29 @@ public class Scheduler {
 									.withTriggerTimestamp(getCurrentTimeMills())
 								)
 							);
-							if (log.isTraceEnabled()) {
-								log.trace("Reschedule trigger...");
-							}
+							trace("Reschedule trigger...");
 							List<Object> result = transaction.exec();
-							log.trace("{} {}", result.toString(), firstElem.getElement());
 							if (!result.isEmpty()) {
-								if (log.isTraceEnabled()) {
-									log.trace("We are first, {}", firstElem.getElement());
-								}
-								publishMessage(firstElem.getElement());
-								if(metricsAggregator != null) {
-									metricsAggregator.withSuccess();
-								}
+								trace("We are first, {}", firstElem.getElement());
+								publishMessage(message);
+								notifySuccess();
 							} else {
-								if (log.isTraceEnabled()) {
-									log.trace("We aren't first");
-									if(metricsAggregator != null) {
-										metricsAggregator.withFail();
-									}
-								}
+								trace("We aren't first");
+								notifyFail();
 							}
+						} else {
+							notifySuccess();
+							List<Object> result;
+							do {
+								Transaction transaction = jedis.multi();
+								transaction.zrem(triggerQueueName, firstElem.getElement());
+								transaction.hdel(messageKeyName, firstElem.getElement());
+								result = transaction.exec();
+							} while (result.isEmpty());
+
 						}
+					} else {
+						notifyFail();
 					}
 				} while (!triggers.isEmpty());
 			}
@@ -348,15 +379,11 @@ public class Scheduler {
 		}
 
 		@SuppressWarnings("ConstantConditions")
-		private void publishMessage(String tocken) {
-			SchedulerToken schedulerTocken = new SchedulerToken(tocken);
-			Message<?> message = getMessage(schedulerTocken);
-			if (message != null) {
-				if (log.isTraceEnabled()) {
-					log.trace("Publish message {} {}", tocken, message);
-				}
-				emitterProcessor.onNext(message);
+		private void publishMessage(Message<?> message) {
+			if (log.isTraceEnabled()) {
+				log.trace("Publish message {}", message);
 			}
+			emitterProcessor.onNext(message);
 		}
 	}
 }
