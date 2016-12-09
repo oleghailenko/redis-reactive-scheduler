@@ -332,48 +332,52 @@ public class Scheduler {
 			trace("Get triggers...");
 			Set<Tuple> triggers;
 			synchronized (mutex) {
-				do {
-					jedis.watch(triggerQueueName, messageKeyName);
-					notifyTry();
-					triggers = jedis.zrangeByScoreWithScores(triggerQueueName, 0, getCurrentTimeMills(), 0, 1);
-					trace("Got triggers {}", triggers.size());
-					if (!triggers.isEmpty()) {
-						Tuple firstElem = triggers.iterator().next();
-						Message<?> message = getMessage(new SchedulerToken(firstElem.getElement()));
-						if (message != null && message.getAttempt() < 5) {
-							Transaction transaction = jedis.multi();
-							transaction.zincrby(triggerQueueName, TimeUnit.MINUTES.toMillis(5), firstElem.getElement());
-							transaction.hset(messageKeyName, firstElem.getElement(), converter.convert(
-								message
-									.withAttempt(message.getAttempt() + 1)
-									.withTriggerTimestamp(getCurrentTimeMills())
-								)
-							);
-							trace("Reschedule trigger...");
-							List<Object> result = transaction.exec();
-							if (!result.isEmpty()) {
-								trace("We are first, {}", firstElem.getElement());
-								publishMessage(message);
-								notifySuccess();
+				try {
+					do {
+						jedis.watch(triggerQueueName, messageKeyName);
+						notifyTry();
+						triggers = jedis.zrangeByScoreWithScores(triggerQueueName, 0, getCurrentTimeMills(), 0, 1);
+						trace("Got triggers {}", triggers.size());
+						if (!triggers.isEmpty()) {
+							Tuple firstElem = triggers.iterator().next();
+							Message<?> message = getMessage(new SchedulerToken(firstElem.getElement()));
+							if (message != null && message.getAttempt() < 5) {
+								Transaction transaction = jedis.multi();
+								transaction.zincrby(triggerQueueName, TimeUnit.MINUTES.toMillis(5), firstElem.getElement());
+								transaction.hset(messageKeyName, firstElem.getElement(), converter.convert(
+									message
+										.withAttempt(message.getAttempt() + 1)
+										.withTriggerTimestamp(getCurrentTimeMills())
+									)
+								);
+								trace("Reschedule trigger...");
+								List<Object> result = transaction.exec();
+								if (!result.isEmpty()) {
+									trace("We are first, {}", firstElem.getElement());
+									publishMessage(message);
+									notifySuccess();
+								} else {
+									trace("We aren't first");
+									notifyFail();
+								}
 							} else {
-								trace("We aren't first");
-								notifyFail();
+								notifySuccess();
+								List<Object> result;
+								do {
+									Transaction transaction = jedis.multi();
+									transaction.zrem(triggerQueueName, firstElem.getElement());
+									transaction.hdel(messageKeyName, firstElem.getElement());
+									result = transaction.exec();
+								} while (result.isEmpty());
+
 							}
 						} else {
-							notifySuccess();
-							List<Object> result;
-							do {
-								Transaction transaction = jedis.multi();
-								transaction.zrem(triggerQueueName, firstElem.getElement());
-								transaction.hdel(messageKeyName, firstElem.getElement());
-								result = transaction.exec();
-							} while (result.isEmpty());
-
+							notifyFail();
 						}
-					} else {
-						notifyFail();
-					}
-				} while (!triggers.isEmpty());
+					} while (!triggers.isEmpty());
+				} catch (Exception e) {
+					log.error("Exceprion has been occurred", e);
+				}
 			}
 			Scheduler.this.scheduleTrigger(this);
 		}
